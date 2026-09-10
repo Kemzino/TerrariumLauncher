@@ -9,6 +9,30 @@
 			<SpinnerIcon v-else class="animate-spin" />
 			{{ formatMessage(messages.signInToMinecraft) }}
 		</Button>
+		<Button v-if="!showOfflineForm" :disabled="loginDisabled" @click="showOfflineForm = true">
+			<UserIcon />
+			{{ formatMessage(messages.addOfflineAccount) }}
+		</Button>
+		<div v-else class="flex flex-col gap-2">
+			<Input
+				v-model="offlineUsername"
+				:placeholder="formatMessage(messages.offlineUsernamePlaceholder)"
+				:maxlength="16"
+				autocapitalize="none"
+				:spellcheck="false"
+				@keyup.enter="addOfflineAccount()"
+			/>
+			<span class="text-secondary text-xs">{{ formatMessage(messages.offlineHint) }}</span>
+			<Button
+				type="colored"
+				color="brand"
+				:disabled="loginDisabled || !offlineUsername.trim()"
+				@click="addOfflineAccount()"
+			>
+				<PlusIcon />
+				{{ formatMessage(messages.addOfflineAccount) }}
+			</Button>
+		</div>
 	</div>
 	<Accordion
 		v-else
@@ -80,6 +104,36 @@
 					<PlusIcon />
 					{{ formatMessage(messages.addAccount) }}
 				</Button>
+				<Button
+					v-if="accounts.length > 0 && !showOfflineForm"
+					class="w-full !bg-button-bg !text-primary ![box-shadow:var(--shadow-button)]"
+					:disabled="loginDisabled"
+					@click="showOfflineForm = true"
+				>
+					<UserIcon />
+					{{ formatMessage(messages.addOfflineAccount) }}
+				</Button>
+				<template v-else-if="accounts.length > 0">
+					<Input
+						v-model="offlineUsername"
+						:placeholder="formatMessage(messages.offlineUsernamePlaceholder)"
+						:maxlength="16"
+						autocapitalize="none"
+						:spellcheck="false"
+						@keyup.enter="addOfflineAccount()"
+					/>
+					<span class="text-secondary text-xs">{{ formatMessage(messages.offlineHint) }}</span>
+					<Button
+						type="colored"
+						color="brand"
+						class="w-full"
+						:disabled="loginDisabled || !offlineUsername.trim()"
+						@click="addOfflineAccount()"
+					>
+						<PlusIcon />
+						{{ formatMessage(messages.addOfflineAccount) }}
+					</Button>
+				</template>
 			</div>
 		</div>
 	</Accordion>
@@ -93,6 +147,7 @@ import {
 	RadioButtonIcon,
 	SpinnerIcon,
 	TrashIcon,
+	UserIcon,
 } from '@modrinth/assets'
 import {
 	Accordion,
@@ -101,6 +156,7 @@ import {
 	defineMessages,
 	IconButton,
 	injectNotificationManager,
+	Input,
 	useVIntl,
 } from '@modrinth/ui'
 import type { Ref } from 'vue'
@@ -112,6 +168,7 @@ import { trackEvent } from '@/helpers/analytics'
 import {
 	get_default_user,
 	login as login_flow,
+	login_offline,
 	remove_user,
 	set_default_user,
 	users,
@@ -136,6 +193,8 @@ type MinecraftCredential = {
 
 const accounts: Ref<MinecraftCredential[]> = ref([])
 const loginDisabled = ref(false)
+const showOfflineForm = ref(false)
+const offlineUsername = ref('')
 const defaultUser = ref<string | undefined>()
 const equippedSkin = ref<Skin | null>(null)
 const equippedHeadUrl = ref<string>()
@@ -247,6 +306,25 @@ async function login() {
 	loginDisabled.value = false
 }
 
+async function addOfflineAccount() {
+	const username = offlineUsername.value.trim()
+	if (!username) {
+		return
+	}
+
+	loginDisabled.value = true
+	const account = await login_offline(username).catch(handleError)
+
+	if (account) {
+		offlineUsername.value = ''
+		showOfflineForm.value = false
+		await setAccount(account)
+	}
+
+	trackEvent('AccountLogIn')
+	loginDisabled.value = false
+}
+
 async function logout(id: string) {
 	await remove_user(id).catch(handleError)
 	await refreshValues()
@@ -288,6 +366,18 @@ const messages = defineMessages({
 	signInToMinecraft: {
 		id: 'minecraft-account.sign-in',
 		defaultMessage: 'Sign in to Minecraft',
+	},
+	addOfflineAccount: {
+		id: 'minecraft-account.add-offline-account',
+		defaultMessage: 'Add offline account',
+	},
+	offlineUsernamePlaceholder: {
+		id: 'minecraft-account.offline-username-placeholder',
+		defaultMessage: 'Username',
+	},
+	offlineHint: {
+		id: 'minecraft-account.offline-hint',
+		defaultMessage: 'Offline accounts only work on servers running with online-mode=false.',
 	},
 })
 </script>

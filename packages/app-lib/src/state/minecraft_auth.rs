@@ -175,6 +175,7 @@ pub async fn login_finish(
         expires: oauth_token.date
             + Duration::seconds(oauth_token.value.expires_in as i64),
         active: true,
+        offline: false,
     };
 
     // During login, we need to fetch the online profile at least once to get the
@@ -197,6 +198,51 @@ pub async fn login_finish(
     Ok(credentials)
 }
 
+/// Creates (or re-activates) an offline account for the given username.
+///
+/// No network calls are made. The resulting credentials only work on servers
+/// running with `online-mode=false`.
+#[tracing::instrument(skip(exec))]
+pub async fn login_offline(
+    username: &str,
+    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
+) -> crate::Result<Credentials> {
+    let username = username.trim();
+
+    // Mirror the constraints the vanilla server enforces, so a player cannot
+    // create an account here that would be rejected at join time.
+    if !(3..=16).contains(&username.chars().count())
+        || !username
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err(crate::ErrorKind::OfflineUsernameError(
+            username.to_owned(),
+        )
+        .into());
+    }
+
+    let credentials = Credentials {
+        offline_profile: MinecraftProfile {
+            id: offline_uuid(username),
+            name: username.to_owned(),
+            ..MinecraftProfile::default()
+        },
+        // Vanilla accepts any non-empty token when the server is offline; "0"
+        // is the value the vanilla launcher itself uses for demo/offline runs.
+        access_token: "0".to_owned(),
+        refresh_token: String::new(),
+        // Offline credentials never expire, which also makes `refresh` a no-op.
+        expires: DateTime::<Utc>::MAX_UTC,
+        active: true,
+        offline: true,
+    };
+
+    credentials.upsert(exec).await?;
+
+    Ok(credentials)
+}
+
 #[derive(Deserialize, Debug)]
 pub struct Credentials {
     /// The offline profile of the user these credentials are for.
@@ -210,6 +256,28 @@ pub struct Credentials {
     pub refresh_token: String,
     pub expires: DateTime<Utc>,
     pub active: bool,
+    /// Whether this is an offline ("cracked") account that was never
+    /// authenticated against Microsoft.
+    ///
+    /// Such accounts hold no usable tokens, so every operation that would talk
+    /// to Microsoft or Mojang on their behalf must be skipped. They only work
+    /// on servers running with `online-mode=false`.
+    #[serde(default)]
+    pub offline: bool,
+}
+
+/// Derives the player UUID vanilla Minecraft assigns to an offline player.
+///
+/// This mirrors `UUID.nameUUIDFromBytes("OfflinePlayer:<name>")` in Java: an MD5
+/// digest stamped with UUID version 3 and the IETF variant. Note that this is
+/// *not* a namespaced UUIDv3 — Java hashes the bare bytes, with no namespace
+/// prefix, so `Uuid::new_v3` would produce a different (wrong) UUID.
+pub fn offline_uuid(username: &str) -> Uuid {
+    let mut bytes: [u8; 16] =
+        md5::Md5::digest(format!("OfflinePlayer:{username}")).into();
+    bytes[6] = (bytes[6] & 0x0f) | 0x30;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes)
 }
 
 /// An entry in the player profile cache, keyed by player UUID.
@@ -271,6 +339,12 @@ impl Credentials {
         &mut self,
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
     ) -> crate::Result<()> {
+        // Offline accounts hold no tokens to refresh, and hitting Microsoft for
+        // them would fail on every launch.
+        if self.offline {
+            return Ok(());
+        }
+
         // Use a margin of 5 minutes to give e.g. Minecraft and potentially
         // other operations that depend on a fresh token 5 minutes to complete
         // from now, and deal with some classes of clock skew
@@ -351,6 +425,12 @@ impl Credentials {
         &self,
         cache_intent: OnlineProfileCacheIntent,
     ) -> Option<Arc<MinecraftProfile>> {
+        // Offline accounts have no Mojang-side profile: no skins, no capes.
+        // Callers fall back to `offline_profile`, which is all we ever know.
+        if self.offline {
+            return None;
+        }
+
         let max_age = cache_intent.max_age();
         let stale_profile = {
             let mut profile_cache = PROFILE_CACHE.lock().await;
@@ -519,7 +599,7 @@ impl Credentials {
         let res = sqlx::query!(
             "
             SELECT
-                uuid, active, username, access_token, refresh_token, expires
+                uuid, active, username, access_token, refresh_token, expires, offline
             FROM minecraft_users
             WHERE active = TRUE
             "
@@ -542,6 +622,7 @@ impl Credentials {
                         .single()
                         .unwrap_or_else(Utc::now),
                     active: x.active == 1,
+                    offline: x.offline,
                 };
                 credentials.refresh(exec).await.ok();
                 Some(credentials)
@@ -556,7 +637,7 @@ impl Credentials {
         let res = sqlx::query!(
             "
             SELECT
-                uuid, active, username, access_token, refresh_token, expires
+                uuid, active, username, access_token, refresh_token, expires, offline
             FROM minecraft_users
             "
         )
@@ -576,6 +657,7 @@ impl Credentials {
                     .single()
                     .unwrap_or_else(Utc::now),
                 active: x.active == 1,
+                offline: x.offline,
             };
 
             async move {
@@ -611,14 +693,15 @@ impl Credentials {
 
         sqlx::query!(
             "
-            INSERT INTO minecraft_users (uuid, active, username, access_token, refresh_token, expires)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO minecraft_users (uuid, active, username, access_token, refresh_token, expires, offline)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (uuid) DO UPDATE SET
                 active = $2,
                 username = $3,
                 access_token = $4,
                 refresh_token = $5,
-                expires = $6
+                expires = $6,
+                offline = $7
             ",
             uuid,
             self.active,
@@ -626,6 +709,7 @@ impl Credentials {
             self.access_token,
             self.refresh_token,
             expires,
+            self.offline,
         )
             .execute(exec)
             .await?;
@@ -682,12 +766,13 @@ impl Serialize for Credentials {
                 ),
         };
 
-        let mut ser = serializer.serialize_struct("Credentials", 5)?;
+        let mut ser = serializer.serialize_struct("Credentials", 6)?;
         ser.serialize_field("profile", &*profile)?;
         ser.serialize_field("access_token", &self.access_token)?;
         ser.serialize_field("refresh_token", &self.refresh_token)?;
         ser.serialize_field("expires", &self.expires)?;
         ser.serialize_field("active", &self.active)?;
+        ser.serialize_field("offline", &self.offline)?;
         ser.end()
     }
 }

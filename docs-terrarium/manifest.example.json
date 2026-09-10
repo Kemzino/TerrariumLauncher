@@ -1,0 +1,68 @@
+{
+  "formatVersion": 1,
+  "pack": "terrarium",
+  "version": "1.4.2",
+  "releasedAt": "2026-09-10T18:00:00Z",
+
+  "minecraft": "1.21.1",
+  "loader": { "type": "neoforge", "version": "21.1.209" },
+
+  "launcher": {
+    "minVersion": "0.3.0",
+    "recommendedMemoryMb": 6144
+  },
+
+  "files": [
+    {
+      "path": "mods/sodium-neoforge-0.6.13+mc1.21.1.jar",
+      "policy": "managed",
+      "size": 1583421,
+      "hashes": { "sha512": "…", "sha1": "…" },
+      "downloads": [
+        "https://cdn.modrinth.com/data/AANobbMI/versions/…/sodium-neoforge-0.6.13%2Bmc1.21.1.jar"
+      ]
+    },
+    {
+      "path": "config/sodium-options.json",
+      "policy": "seed",
+      "size": 812,
+      "hashes": { "sha512": "…" },
+      "downloads": ["overrides:config/sodium-options.json"]
+    },
+    {
+      "path": "config/jei/jei-client.ini",
+      "policy": "merge",
+      "mergeFormat": "ini",
+      "size": 2044,
+      "hashes": { "sha512": "…" },
+      "downloads": ["overrides:config/jei/jei-client.ini"]
+    },
+    {
+      "path": "servers.dat",
+      "policy": "force",
+      "size": 168,
+      "hashes": { "sha512": "…" },
+      "downloads": ["overrides:servers.dat"]
+    },
+    {
+      "path": "mods/iris-neoforge-1.8.8+mc1.21.1.jar",
+      "policy": "managed",
+      "optional": { "id": "shaders", "default": false },
+      "size": 5120344,
+      "hashes": { "sha512": "…" },
+      "downloads": ["https://cdn.modrinth.com/data/YL57xq9U/versions/…/iris.jar"]
+    }
+  ],
+
+  "overrides": {
+    "url": "https://github.com/OWNER/terrarium-pack/releases/download/v1.4.2/overrides.zip",
+    "size": 482113,
+    "hashes": { "sha512": "…" }
+  },
+
+  "signature": {
+    "algorithm": "ed25519",
+    "keyId": "terrarium-2026-09",
+    "value": "…"
+  }
+}

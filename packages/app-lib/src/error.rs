@@ -146,6 +146,11 @@ pub enum ErrorKind {
     #[error("User is not logged in, no credentials available!")]
     NoCredentialsError,
 
+    #[error(
+        "\"{0}\" is not a valid offline username: it must be 3 to 16 characters long and contain only letters, digits and underscores"
+    )]
+    OfflineUsernameError(String),
+
     #[error("JRE error: {0}")]
     JREError(#[from] crate::util::jre::JREError),
 

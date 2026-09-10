@@ -131,6 +131,7 @@ lz4_flex = { version = "0.11.5", default-features = false, features = [
   "safe-encode",
   "std",
 ] }
+md-5 = "0.10.6"
 maxminddb = "0.26.0"
 modrinth-content-management = { path = "packages/modrinth-content-management" }
 modrinth-log = { path = "packages/modrinth-log" }

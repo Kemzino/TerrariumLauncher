@@ -9,6 +9,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         .invoke_handler(tauri::generate_handler![
             check_reachable,
             login,
+            login_offline,
             remove_user,
             get_default_user,
             set_default_user,
@@ -84,6 +85,14 @@ pub async fn login<R: Runtime>(
 
     window.close()?;
     Ok(None)
+}
+
+/// Adds an offline account, which requires no Microsoft sign-in.
+///
+/// Such an account only works on servers running with `online-mode=false`.
+#[tauri::command]
+pub async fn login_offline(username: String) -> Result<Credentials> {
+    Ok(minecraft_auth::login_offline(&username).await?)
 }
 
 #[tauri::command]

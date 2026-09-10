@@ -34,6 +34,17 @@ export async function login() {
 }
 
 /**
+ * Adds an offline account, which requires no Microsoft sign-in.
+ * Such an account only works on servers running with online-mode=false.
+ *
+ * @param {string} username - 3 to 16 characters, letters/digits/underscores only.
+ * @returns {Promise<Credentials>}
+ */
+export async function login_offline(username) {
+	return await invoke('plugin:auth|login_offline', { username })
+}
+
+/**
  * Retrieves the default user
  * @return {Promise<UUID | undefined>}
  */

@@ -47,6 +47,16 @@ pub async fn finish_login(
     Ok(credentials)
 }
 
+/// Creates or re-activates an offline account, without contacting Microsoft.
+///
+/// Only usable on servers running with `online-mode=false`.
+#[tracing::instrument]
+pub async fn login_offline(username: &str) -> crate::Result<Credentials> {
+    let state = State::get().await?;
+
+    crate::state::login_offline(username, &state.pool).await
+}
+
 #[tracing::instrument]
 pub async fn get_default_user() -> crate::Result<Option<uuid::Uuid>> {
     let state = State::get().await?;

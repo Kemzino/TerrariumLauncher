@@ -133,6 +133,9 @@ where
                     expires: legacy_credentials.expires,
                     active: minecraft_auth.default_user == Some(uuid)
                         || minecraft_users_len == 1,
+                    // The legacy launcher had no offline accounts, so anything
+                    // being migrated is necessarily a Microsoft account.
+                    offline: false,
                 }
                 .upsert(exec)
                 .await?;
