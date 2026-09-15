@@ -677,6 +677,21 @@ function openSettings(tab?: number) {
 	settingsModal.value?.show(tab)
 }
 
+// Terrarium: адмін приходить із головної, щоб змінити ядро — одразу відкриваємо
+// вкладку «Установка» (game/loader version). ?settings=installation
+const SETTINGS_TABS: Record<string, number> = { general: 0, installation: 1 }
+watch(
+	() => [route.query.settings, instance.value?.id] as const,
+	([wanted, id]) => {
+		if (typeof wanted !== 'string' || !id) return
+		const tab = SETTINGS_TABS[wanted]
+		if (tab === undefined) return
+		void router.replace({ query: { ...route.query, settings: undefined } })
+		setTimeout(() => openSettings(tab), 150)
+	},
+	{ immediate: true },
+)
+
 async function browseContent(projectType?: string) {
 	const currentInstance = instance.value
 	if (!currentInstance || currentInstance.quarantined) return

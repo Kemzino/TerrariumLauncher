@@ -170,19 +170,21 @@ impl ProjectType {
     }
 
     pub fn get_from_parent_folder(path: impl AsRef<Path>) -> Option<Self> {
-        match path
-            .as_ref()
-            .parent()?
-            .file_name()?
-            .to_str()
-            .unwrap_or_default()
-        {
+        let path = path.as_ref();
+        let parent = path.parent()?;
+        let by_name = |dir: &Path| match dir.file_name()?.to_str()? {
             "mods" => Some(ProjectType::Mod),
             "datapacks" => Some(ProjectType::DataPack),
             "resourcepacks" => Some(ProjectType::ResourcePack),
             "shaderpacks" => Some(ProjectType::ShaderPack),
             _ => None,
-        }
+        };
+        // Terrarium: моди можуть лежати в групі `mods/<Група>/x.jar`
+        by_name(parent).or_else(|| {
+            let grandparent = parent.parent()?;
+            (by_name(grandparent) == Some(ProjectType::Mod))
+                .then_some(ProjectType::Mod)
+        })
     }
 
     pub fn get_name(&self) -> &'static str {

@@ -14,6 +14,7 @@ fn main() {
                     .commands(&[
                         "check_reachable",
                         "login",
+                        "login_offline",
                         "remove_user",
                         "get_default_user",
                         "set_default_user",
@@ -335,6 +336,30 @@ fn main() {
                 "shortcuts",
                 InlinedPlugin::new()
                     .commands(&["create_instance_shortcut"])
+                    .default_permission(
+                        DefaultPermissionRule::AllowAllCommands,
+                    ),
+            )
+            .plugin(
+                "terrarium",
+                InlinedPlugin::new()
+                    .commands(&[
+                        "terrarium_get_state",
+                        "terrarium_set_state",
+                        "terrarium_fetch_latest_release",
+                        "terrarium_download_release",
+                        "terrarium_verify_admin_token",
+                        "terrarium_publish_release",
+                        "terrarium_publish_preview",
+                        "terrarium_apply_pack_branding",
+                        "terrarium_prepare_pack_update",
+                        "terrarium_list_mod_groups",
+                        "terrarium_create_mod_group",
+                        "terrarium_rename_mod_group",
+                        "terrarium_delete_mod_group",
+                        "terrarium_set_mod_group",
+                        "terrarium_promote_release",
+                    ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
                     ),

@@ -17,6 +17,7 @@ pub mod reports;
 pub mod settings;
 pub mod shortcuts;
 pub mod tags;
+pub mod terrarium;
 mod thumbnails;
 pub mod users;
 pub mod utils;

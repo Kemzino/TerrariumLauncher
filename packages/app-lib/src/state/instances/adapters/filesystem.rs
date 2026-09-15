@@ -1,3 +1,4 @@
+use crate::state::instances::commands::mod_groups;
 use crate::state::{ProjectType, file_hash_cache_key, file_modified_at_ns};
 use crate::util::io::{self, IOError};
 use std::path::{Path, PathBuf};
@@ -26,8 +27,35 @@ pub(crate) fn scan_content_files(
             continue;
         }
 
-        for entry in std::fs::read_dir(&folder_path)
-            .map_err(|err| IOError::with_path(err, &folder_path))?
+        // Terrarium: моди можуть лежати в групах `mods/<Група>/`; поки гра
+        // запущена, вони фізично в корені, а група — у карті розкладання.
+        let flatten_map = if project_type == ProjectType::Mod {
+            mod_groups::read_flatten_map_sync(&folder_path).filter(|map| {
+                map.reason == Some(mod_groups::FlattenReason::Launch)
+            })
+        } else {
+            None
+        };
+        let mut scan_targets: Vec<(PathBuf, Option<String>)> =
+            vec![(folder_path.clone(), None)];
+        if project_type == ProjectType::Mod {
+            for entry in std::fs::read_dir(&folder_path)
+                .map_err(|err| IOError::with_path(err, &folder_path))?
+            {
+                let path = entry.map_err(IOError::from)?.path();
+                let Some(name) = path.file_name().and_then(|n| n.to_str())
+                else {
+                    continue;
+                };
+                if path.is_dir() && mod_groups::is_group_dir_name(name) {
+                    scan_targets.push((path.clone(), Some(name.to_string())));
+                }
+            }
+        }
+
+        for (dir, group) in scan_targets {
+        for entry in std::fs::read_dir(&dir)
+            .map_err(|err| IOError::with_path(err, &dir))?
         {
             let path = entry.map_err(IOError::from)?.path();
             if !path.is_file() {
@@ -48,7 +76,15 @@ pub(crate) fn scan_content_files(
             let size = metadata.len();
             let modified_at_ns =
                 file_modified_at_ns(&metadata).map_err(IOError::from)?;
-            let relative_path = format!("{folder}/{file_name}");
+            let group = group.clone().or_else(|| {
+                flatten_map
+                    .as_ref()
+                    .and_then(|m| m.files.get(file_name).cloned())
+            });
+            let relative_path = match &group {
+                Some(group) => format!("{folder}/{group}/{file_name}"),
+                None => format!("{folder}/{file_name}"),
+            };
             let hash_cache_key = file_hash_cache_key(
                 size,
                 modified_at_ns,
@@ -62,6 +98,7 @@ pub(crate) fn scan_content_files(
                 size,
                 hash_cache_key,
             });
+        }
         }
     }
 

@@ -30,6 +30,8 @@ interface Props {
 	flat?: boolean
 	showItemActions?: boolean
 	showVersion?: boolean
+	/** Terrarium: рядки можна тягнути (перенесення між групами) */
+	draggable?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -43,6 +45,7 @@ const props = withDefaults(defineProps<Props>(), {
 	flat: false,
 	showItemActions: false,
 	showVersion: true,
+	draggable: false,
 })
 
 const stickyHeaderRef = ref<HTMLElement | null>(null)
@@ -56,6 +59,8 @@ const emit = defineEmits<{
 	update: [id: string]
 	switchVersion: [id: string]
 	sort: [column: ContentCardTableSortColumn, direction: ContentCardTableSortDirection]
+	dragstart: [id: string, event: DragEvent]
+	dragend: []
 }>()
 
 // Check if any actions are available
@@ -312,6 +317,7 @@ function handleSort(column: ContentCardTableSortColumn) {
 					:hide-delete="hideDelete || item.hideDelete"
 					:hide-actions="!hasAnyActions"
 					:selected="isItemSelected(item.id)"
+					:draggable="draggable && !item.disabled ? 'true' : undefined"
 					:class="[
 						isItemSelected(item.id)
 							? 'bg-surface-2.5'
@@ -324,6 +330,8 @@ function handleSort(column: ContentCardTableSortColumn) {
 							: '',
 						visibleRange.start + idx === items.length - 1 && !flat ? 'rounded-b-[20px]' : '',
 					]"
+					@dragstart="(event: DragEvent) => emit('dragstart', item.id, event)"
+					@dragend="emit('dragend')"
 					@select="
 						(val, event) =>
 							toggleItemSelection(item.id, val ?? false, visibleRange.start + idx, event)
@@ -386,6 +394,7 @@ function handleSort(column: ContentCardTableSortColumn) {
 				:hide-delete="hideDelete || item.hideDelete"
 				:hide-actions="!hasAnyActions"
 				:selected="isItemSelected(item.id)"
+				:draggable="draggable && !item.disabled ? 'true' : undefined"
 				:class="[
 					isItemSelected(item.id)
 						? 'bg-surface-2.5'
@@ -396,6 +405,8 @@ function handleSort(column: ContentCardTableSortColumn) {
 					item.id === highlightedItemId ? 'outline outline-2 -outline-offset-2 outline-brand' : '',
 					index === items.length - 1 && !flat ? 'rounded-b-[20px]' : '',
 				]"
+				@dragstart="(event: DragEvent) => emit('dragstart', item.id, event)"
+				@dragend="emit('dragend')"
 				@select="(val, event) => toggleItemSelection(item.id, val ?? false, index, event)"
 				@update:enabled="(val) => emit('update:enabled', item.id, val)"
 				@delete="(e: MouseEvent) => emit('delete', item.id, e)"

@@ -25,9 +25,27 @@ export interface ContentDependencyWarning {
 	}>
 }
 
+/**
+ * Terrarium: групи модів — справжні підпапки `mods/<Група>/`, показані як
+ * акордеони. Коли не задано, список показується плоско.
+ */
+export interface ContentModGroups {
+	groups: Ref<string[]> | ComputedRef<string[]>
+	groupOf: (item: ContentItem) => string | null
+	/** Чи можна переносити цей елемент між групами (лише моди) */
+	canGroup: (item: ContentItem) => boolean
+	create: (name: string) => Promise<void>
+	rename: (oldName: string, newName: string) => Promise<void>
+	remove: (name: string) => Promise<void>
+	move: (items: ContentItem[], group: string | null) => Promise<void>
+	/** Перемикач «показати й моди збірки в списку» (коли є керований уміст) */
+	showManaged?: Ref<boolean>
+}
+
 export interface ContentManagerContext {
 	// Data
 	items: Ref<ContentItem[]> | ComputedRef<ContentItem[]>
+	modGroups?: ContentModGroups
 	loading: Ref<boolean>
 	error: Ref<Error | null>
 

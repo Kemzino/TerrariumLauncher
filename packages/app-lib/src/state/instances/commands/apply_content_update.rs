@@ -117,9 +117,28 @@ async fn apply_content_update(
         )
         .await?;
         remove_project(instance_id, project_path, state).await?;
+        new_path = keep_mod_group(instance_id, project_path, new_path, state)
+            .await?;
     }
 
     Ok(new_path)
+}
+
+/// Terrarium: оновлений мод лишається в тій групі (`mods/<Група>/`), де був.
+async fn keep_mod_group(
+    instance_id: &str,
+    old_path: &str,
+    new_path: String,
+    state: &State,
+) -> crate::Result<String> {
+    let Some(group) = super::mod_groups::group_of(old_path) else {
+        return Ok(new_path);
+    };
+    if super::mod_groups::group_of(&new_path) == Some(group) {
+        return Ok(new_path);
+    }
+    super::mod_groups::set_mod_group(instance_id, &new_path, Some(group), state)
+        .await
 }
 
 pub(crate) async fn update_all_projects(
@@ -179,6 +198,13 @@ pub(crate) async fn update_all_projects(
                     .await?;
                     remove_project(instance_id, &update.relative_path, state)
                         .await?;
+                    new_path = keep_mod_group(
+                        instance_id,
+                        &update.relative_path,
+                        new_path,
+                        state,
+                    )
+                    .await?;
                 }
 
                 changed.insert(update.relative_path, new_path);

@@ -17,6 +17,7 @@ import { computed, ref } from 'vue'
 
 import { useManagedContentPolicy } from '@/composables/instances/use-managed-content-policy'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
+import { useTerrariumState } from '@/composables/use-terrarium-state'
 import { trackEvent } from '@/helpers/analytics'
 import { get_project_versions, get_version } from '@/helpers/cache'
 import {
@@ -122,6 +123,17 @@ const isModrinthLinkedModpack = computed(
 )
 const isImportedModpack = computed(() => instance.value.link?.type === 'imported_modpack')
 const isSharedInstanceManagedModpack = managedContentPolicy.isManagedModpack
+
+// Адмін Terrarium редагує ядро (версію гри/завантажувача) примірника нашої збірки
+// як звичайний примірник — зміни потім ідуть у реліз через публікацію.
+const terrarium = useTerrariumState()
+terrarium.reload().catch(() => {})
+const isTerrariumAdminPack = computed(
+	() =>
+		terrarium.isAdmin.value &&
+		(terrarium.state.value.client.instance_id === instance.value.id ||
+			terrarium.state.value.server.instance_id === instance.value.id),
+)
 const canUnlinkSharedInstance = managedContentPolicy.canUnlink
 
 const modpackInfoQuery = useQuery({
@@ -232,10 +244,11 @@ provideInstallationSettings({
 	}),
 	isLinked: computed(
 		() =>
-			isModrinthLinkedModpack.value ||
+			!isTerrariumAdminPack.value &&
+			(isModrinthLinkedModpack.value ||
 			isImportedModpack.value ||
-			instance.value.link?.type === 'server_project' ||
-			isSharedInstanceManagedModpack.value,
+				instance.value.link?.type === 'server_project' ||
+				isSharedInstanceManagedModpack.value),
 	),
 	isBusy: installationSettingsBusy,
 	busyMessage: installationSettingsBusyMessage,

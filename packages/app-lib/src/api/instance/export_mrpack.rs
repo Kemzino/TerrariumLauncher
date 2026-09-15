@@ -14,7 +14,8 @@ use crate::util::io::{self, IOError};
 use futures::{StreamExt, stream};
 use path_util::SafeRelativeUtf8UnixPathBuf;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use crate::state::instances::commands::{flat_path, group_of};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Read, Seek, Write};
 use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
@@ -34,6 +35,8 @@ const STANDARD_ZIP_FILE_SIZE_ERROR: &str = "Your modpack cannot be exported as i
 
 const NEVER_EXPORTABLE_PATH_PREFIXES: &[&str] = &[
     "profile.json",
+    "mods/README.txt",
+    "mods/.terrarium-flatten.json",
     "modrinth_logs",
     "mods/.connector",
     ".sable/natives",
@@ -195,6 +198,33 @@ pub async fn export_mrpack(
         .map(|file| file.path.as_str().to_string())
         .collect::<HashSet<_>>();
 
+    // Terrarium: у пакеті моди лежать плоско (`mods/x.jar`) — завантажувачі
+    // підпапок не читають; групи їдуть окремо в `.terrarium/groups.json`.
+    let mut pack_groups: BTreeMap<String, String> = BTreeMap::new();
+    let mut flat_paths = HashSet::<String>::new();
+    let mut flatten = |path: &str| -> crate::Result<String> {
+        let flat = flat_path(path);
+        if !flat_paths.insert(flat.clone()) {
+            return Err(crate::ErrorKind::OtherError(format!(
+                "У пакеті двічі трапляється {flat} (у різних групах) — лиши один"
+            ))
+            .into());
+        }
+        if let Some(group) = group_of(path) {
+            let file_name = flat.rsplit('/').next().unwrap_or(&flat);
+            pack_groups.insert(file_name.to_string(), group.to_string());
+        }
+        Ok(flat)
+    };
+    for file in &mut packfile.files {
+        let flat = flatten(file.path.as_str())?;
+        if flat != file.path.as_str() {
+            file.path = flat.try_into().map_err(|_| {
+                crate::ErrorKind::OtherError("Invalid flattened path".into())
+            })?;
+        }
+    }
+
     let mut override_files = Vec::new();
     let mut directories = vec![instance_base_path.clone()];
     while let Some(directory) = directories.pop() {
@@ -234,8 +264,26 @@ pub async fn export_mrpack(
                 .map_err(|e| IOError::with_path(e, &path))?
                 .len();
             ensure_standard_zip_file_size(size)?;
+            let flat = flatten(relative_path.as_str())?;
+            let relative_path = if flat == relative_path.as_str() {
+                relative_path
+            } else {
+                flat.try_into().map_err(|_| {
+                    crate::ErrorKind::OtherError("Invalid flattened path".into())
+                })?
+            };
             override_files.push((path, relative_path, size));
         }
+    }
+    let mut extra_entries = Vec::new();
+    if !pack_groups.is_empty() {
+        extra_entries.push((
+            format!(
+                "overrides/{}",
+                crate::state::instances::commands::PACK_GROUPS_FILE
+            ),
+            serde_json::to_vec_pretty(&pack_groups)?,
+        ));
     }
 
     let total_bytes = override_files
@@ -254,9 +302,15 @@ pub async fn export_mrpack(
     tokio::task::spawn_blocking(move || {
         let file = std::fs::File::create(&export_path)
             .map_err(|error| IOError::with_path(error, &export_path))?;
-        write_mrpack_archive(file, override_files, &data, |bytes_written| {
-            emit_loading(&loading_bar, bytes_written as f64, None)
-        })
+        write_mrpack_archive(
+            file,
+            override_files,
+            extra_entries,
+            &data,
+            |bytes_written| {
+                emit_loading(&loading_bar, bytes_written as f64, None)
+            },
+        )
     })
     .await??;
 
@@ -277,6 +331,7 @@ fn ensure_standard_zip_file_size(size: u64) -> crate::Result<()> {
 fn write_mrpack_archive<W, F>(
     writer: W,
     override_files: Vec<(PathBuf, SafeRelativeUtf8UnixPathBuf, u64)>,
+    extra_entries: Vec<(String, Vec<u8>)>,
     packfile_data: &[u8],
     mut emit_progress: F,
 ) -> crate::Result<()>
@@ -288,6 +343,11 @@ where
         .compression_method(CompressionMethod::Deflated);
     let mut writer = ZipWriter::new(writer);
     let mut buffer = vec![0_u8; EXPORT_COPY_BUFFER_SIZE];
+
+    for (name, bytes) in extra_entries {
+        writer.start_file(name, options).map_err(std::io::Error::from)?;
+        writer.write_all(&bytes)?;
+    }
 
     for (path, relative_path, _) in override_files {
         writer

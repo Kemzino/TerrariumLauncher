@@ -1,0 +1,216 @@
+import { invoke } from '@tauri-apps/api/core'
+
+export type PackKind = 'client' | 'server'
+/** Канал релізів: stable — для всіх; test — pre-release, бачать адміни й тестери */
+export type Channel = 'stable' | 'test'
+export type AccessRole = 'admin' | 'tester'
+
+export interface PackState {
+	instance_id: string | null
+	installed_tag: string | null
+	excluded_paths: string[]
+}
+
+export interface TerrariumState {
+	admin_token: string | null
+	role: AccessRole | null
+	active_pack: PackKind
+	active_channel: Channel
+	client: PackState
+	server: PackState
+	client_test: PackState
+	server_test: PackState
+}
+
+export function packStateKey(pack: PackKind, channel: Channel) {
+	return channel === 'test' ? (`${pack}_test` as const) : pack
+}
+
+export interface TerrariumRelease {
+	pack: PackKind
+	id: number
+	prerelease: boolean
+	html_url: string
+	tag: string
+	name: string
+	body: string | null
+	published_at: string | null
+	mrpack_name: string
+	mrpack_url: string
+	mrpack_size: number
+	mrpack_asset_id: number
+}
+
+export async function terrarium_get_state() {
+	return await invoke<TerrariumState>('plugin:terrarium|terrarium_get_state')
+}
+
+export async function terrarium_set_state(state: TerrariumState) {
+	return await invoke<void>('plugin:terrarium|terrarium_set_state', { state })
+}
+
+export async function terrarium_fetch_latest_release(pack: PackKind, channel: Channel = 'stable') {
+	return await invoke<TerrariumRelease>('plugin:terrarium|terrarium_fetch_latest_release', {
+		pack,
+		channel,
+	})
+}
+
+/** «Поширити для всіх»: тестовий реліз стає звичайним (latest). */
+export async function terrarium_promote_release(pack: PackKind, releaseId: number) {
+	return await invoke<TerrariumRelease>('plugin:terrarium|terrarium_promote_release', {
+		pack,
+		releaseId,
+	})
+}
+
+export async function terrarium_download_release(release: TerrariumRelease) {
+	return await invoke<string>('plugin:terrarium|terrarium_download_release', { release })
+}
+
+export interface AdminInfo {
+	login: string
+	client_repo: string
+	can_push_client: boolean
+	server_repo: string
+	can_push_server: boolean
+	can_read_server: boolean
+	role: AccessRole | null
+}
+
+export interface PublishRequest {
+	pack: PackKind
+	instance_id: string
+	tag: string
+	name: string
+	body: string | null
+	/** Спершу в тест (pre-release) */
+	prerelease: boolean
+	excluded: string[]
+}
+
+export interface PublishCandidate {
+	path: string
+	/** Плоский шлях у пакеті (`mods/x.jar`) — за ним порівнюємо з релізом */
+	pack_path: string
+	/** Група мода (`mods/<Група>/`), якщо є */
+	group: string | null
+	file_name: string
+	folder: string
+	size: number | null
+	in_release: boolean
+	changed: boolean
+	excluded: boolean
+	disabled: boolean
+}
+
+export interface PackCore {
+	game_version: string
+	loader: string
+	loader_version: string | null
+}
+
+export interface PublishPreview {
+	release_tag: string | null
+	release_prerelease: boolean
+	core: PackCore
+	release_core: PackCore | null
+	name: string
+	release_name: string | null
+	icon_changed: boolean
+	candidates: PublishCandidate[]
+	removed_from_instance: string[]
+}
+
+export interface PublishedRelease {
+	pack: PackKind
+	prerelease: boolean
+	tag: string
+	html_url: string
+	asset_name: string
+}
+
+export async function terrarium_verify_admin_token(token: string) {
+	return await invoke<AdminInfo>('plugin:terrarium|terrarium_verify_admin_token', { token })
+}
+
+export async function terrarium_publish_release(request: PublishRequest) {
+	return await invoke<PublishedRelease>('plugin:terrarium|terrarium_publish_release', { request })
+}
+
+export async function terrarium_publish_preview(pack: PackKind, instanceId: string) {
+	return await invoke<PublishPreview>('plugin:terrarium|terrarium_publish_preview', {
+		pack,
+		instanceId,
+	})
+}
+
+/** Наступний patch-тег після поточного: v1.2.3 → v1.2.4; якщо нічого — v1.0.0. */
+export function suggestNextTag(current: string | null | undefined): string {
+	const match = current?.match(/^(v?)(\d+)\.(\d+)\.(\d+)$/)
+	if (!match) return 'v1.0.0'
+	const [, prefix, major, minor, patch] = match
+	return `${prefix || 'v'}${major}.${minor}.${Number(patch) + 1}`
+}
+
+/** Після встановлення/оновлення: застосувати іконку з пакета (`.terrarium/icon.*`). */
+export async function terrarium_apply_pack_branding(instanceId: string) {
+	return await invoke<boolean>('plugin:terrarium|terrarium_apply_pack_branding', { instanceId })
+}
+
+// ---------------------------------------------------------------------------
+// Групи модів: справжні підпапки mods/<Група>/, на час гри розкладаються в корінь
+
+export interface ContentGroup {
+	name: string
+	files: number
+}
+
+/** `mods/Група/x.jar` → `Група`; інакше null */
+export function modGroupOf(filePath: string | undefined | null): string | null {
+	if (!filePath) return null
+	const parts = filePath.split('/')
+	return parts.length === 3 && parts[0] === 'mods' ? parts[1] : null
+}
+
+/** Перед оновленням збірки в наявний примірник. */
+export async function terrarium_prepare_pack_update(instanceId: string) {
+	return await invoke<void>('plugin:terrarium|terrarium_prepare_pack_update', { instanceId })
+}
+
+export async function terrarium_list_mod_groups(instanceId: string) {
+	return await invoke<ContentGroup[]>('plugin:terrarium|terrarium_list_mod_groups', { instanceId })
+}
+
+export async function terrarium_create_mod_group(instanceId: string, name: string) {
+	return await invoke<string>('plugin:terrarium|terrarium_create_mod_group', { instanceId, name })
+}
+
+export async function terrarium_rename_mod_group(
+	instanceId: string,
+	oldName: string,
+	newName: string,
+) {
+	return await invoke<string>('plugin:terrarium|terrarium_rename_mod_group', {
+		instanceId,
+		oldName,
+		newName,
+	})
+}
+
+export async function terrarium_delete_mod_group(instanceId: string, name: string) {
+	return await invoke<void>('plugin:terrarium|terrarium_delete_mod_group', { instanceId, name })
+}
+
+/** Перемістити файли в групу (null — прибрати з групи). Повертає нові шляхи. */
+export async function terrarium_set_mod_group(
+	instanceId: string,
+	paths: string[],
+	group: string | null,
+) {
+	return await invoke<string[]>('plugin:terrarium|terrarium_set_mod_group', {
+		instanceId,
+		paths,
+		group,
+	})
+}

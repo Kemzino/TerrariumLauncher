@@ -25,6 +25,13 @@ pub(crate) async fn sync_instance_content_files(
     state: &State,
 ) -> crate::Result<Vec<InstanceFile>> {
     let _content_lock = state.lock_instance_content(&instance.id).await;
+    // Terrarium: карта розкладання лишилась після краху, а гра не працює
+    super::mod_groups::restore_if_stale(
+        &instance.id,
+        &state.directories.instances_dir().join(&instance.path),
+        state,
+    )
+    .await?;
     let scanned = filesystem::scan_content_files(
         &state.directories.instances_dir(),
         &instance.path,

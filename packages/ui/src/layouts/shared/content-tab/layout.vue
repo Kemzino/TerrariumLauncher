@@ -2,16 +2,23 @@
 import {
 	ArrowDownAZIcon,
 	ArrowUpZAIcon,
+	ChevronDownIcon,
 	ClockArrowDownIcon,
 	ClockArrowUpIcon,
 	CodeIcon,
 	CompassIcon,
 	DownloadIcon,
 	DropdownIcon,
+	EyeIcon,
+	EyeOffIcon,
 	FileIcon,
+	FolderIcon,
 	FolderOpenIcon,
+	FolderUpIcon,
 	LinkIcon,
 	OrganizationIcon,
+	PencilIcon,
+	PlusIcon,
 	RefreshCwIcon,
 	SearchIcon,
 	ShareIcon,
@@ -23,7 +30,12 @@ import { useSessionStorage } from '@vueuse/core'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import Avatar from '#ui/components/base/Avatar.vue'
-import { Button, type ButtonMenuOption, TeleportOverflowMenu } from '#ui/components/base/buttons'
+import {
+	Button,
+	type ButtonMenuLeafOption,
+	type ButtonMenuOption,
+	TeleportOverflowMenu,
+} from '#ui/components/base/buttons'
 import DropdownFilterBar from '#ui/components/base/DropdownFilterBar.vue'
 import EmptyState from '#ui/components/base/EmptyState.vue'
 import FilterPills from '#ui/components/base/FilterPills.vue'
@@ -40,6 +52,7 @@ import ConfirmDeletionModal from './components/modals/ConfirmDeletionModal.vue'
 import ConfirmDisableModal from './components/modals/ConfirmDisableModal.vue'
 import ConfirmUnlinkModal from './components/modals/ConfirmUnlinkModal.vue'
 import ContentDependencyWarningModal from './components/modals/ContentDependencyWarningModal.vue'
+import ModGroupNameModal from './components/modals/ModGroupNameModal.vue'
 import {
 	getClientWarningType,
 	useBulkOperation,
@@ -71,6 +84,23 @@ const props = withDefaults(
 )
 
 const messages = defineMessages({
+	groupUngrouped: { id: 'content.mod-groups.ungrouped', defaultMessage: 'Без групи' },
+	groupNew: { id: 'content.mod-groups.new', defaultMessage: 'Нова група' },
+	groupRename: { id: 'content.mod-groups.rename', defaultMessage: 'Перейменувати' },
+	groupDissolve: { id: 'content.mod-groups.dissolve', defaultMessage: 'Розформувати' },
+	groupDissolveTooltip: {
+		id: 'content.mod-groups.dissolve-tooltip',
+		defaultMessage: 'Моди перемістяться в корінь mods/, папка зникне',
+	},
+	groupMoveTo: { id: 'content.mod-groups.move-to', defaultMessage: 'У групу' },
+	groupRemoveFrom: { id: 'content.mod-groups.remove-from', defaultMessage: 'Прибрати з групи' },
+	groupEmpty: { id: 'content.mod-groups.empty', defaultMessage: 'Порожня група' },
+	groupAllContent: {
+		id: 'content.mod-groups.all-content',
+		defaultMessage: 'Увесь уміст — зі збірки та твій',
+	},
+	groupShowPack: { id: 'content.mod-groups.show-pack', defaultMessage: 'Показати моди збірки' },
+	groupHidePack: { id: 'content.mod-groups.hide-pack', defaultMessage: 'Лише мій уміст' },
 	loadingContent: {
 		id: 'content.page-layout.loading',
 		defaultMessage: 'Loading content...',
@@ -455,7 +485,7 @@ const tableItems = computed<ContentCardTableItem[]>(() => {
 			clientWarning,
 			hideDelete: base.hideDelete,
 			hideSwitchVersion: base.hideSwitchVersion ?? !base.versionLink,
-			overflowOptions: ctx.getOverflowOptions?.(item),
+			overflowOptions: withGroupOptions(item, ctx.getOverflowOptions?.(item)),
 		}
 	})
 
@@ -470,6 +500,183 @@ const tableItems = computed<ContentCardTableItem[]>(() => {
 
 	return items
 })
+
+// Terrarium: групи модів (підпапки mods/<Група>/) як акордеони
+const modGroups = ctx.modGroups
+const modGroupNameModal = ref<InstanceType<typeof ModGroupNameModal>>()
+const collapsedGroups = ctx.filterPersistKey
+	? useSessionStorage<Record<string, boolean>>(
+			`content-groups-collapsed:${ctx.filterPersistKey}`,
+			{},
+		)
+	: ref<Record<string, boolean>>({})
+const UNGROUPED_KEY = '\u0000ungrouped'
+
+interface GroupedSection {
+	key: string
+	name: string | null
+	items: ContentCardTableItem[]
+}
+
+const groupedSections = computed<GroupedSection[]>(() => {
+	if (!modGroups) return []
+	const byId = new Map(filteredItems.value.map((item) => [getItemId(item), item]))
+	const buckets = new Map<string | null, ContentCardTableItem[]>()
+	for (const name of modGroups.groups.value) buckets.set(name, [])
+	buckets.set(null, [])
+	for (const row of tableItems.value) {
+		const item = byId.get(row.id)
+		const group = item ? modGroups.groupOf(item) : null
+		if (!buckets.has(group)) buckets.set(group, [])
+		buckets.get(group)!.push(row)
+	}
+	const sections: GroupedSection[] = []
+	for (const [name, items] of buckets) {
+		if (name === null) continue
+		// Порожні групи ховаємо лише коли активний пошук — щоб не заважали
+		if (items.length === 0 && searchQuery.value) continue
+		sections.push({ key: name, name, items })
+	}
+	sections.sort((a, b) => a.name!.localeCompare(b.name!, undefined, { sensitivity: 'base' }))
+	sections.push({ key: UNGROUPED_KEY, name: null, items: buckets.get(null) ?? [] })
+	return sections
+})
+
+function isGroupCollapsed(key: string) {
+	return !!collapsedGroups.value[key]
+}
+
+function toggleGroupCollapsed(key: string) {
+	collapsedGroups.value = { ...collapsedGroups.value, [key]: !collapsedGroups.value[key] }
+}
+
+function promptCreateGroup() {
+	modGroupNameModal.value?.show('create', '', (name) => modGroups!.create(name))
+}
+
+function promptRenameGroup(name: string) {
+	modGroupNameModal.value?.show('rename', name, (next) => modGroups!.rename(name, next))
+}
+
+async function dissolveGroup(name: string) {
+	await modGroups!.remove(name)
+}
+
+const groupableSelectedItems = computed(() =>
+	modGroups ? selectedItems.value.filter((item) => modGroups.canGroup(item)) : [],
+)
+
+function groupMoveOptions(targets: () => ContentItem[]): ButtonMenuLeafOption[] {
+	if (!modGroups) return []
+	const options: ButtonMenuLeafOption[] = modGroups.groups.value.map((name) => ({
+		id: `group:${name}`,
+		label: name,
+		icon: FolderIcon,
+		action: () => void modGroups.move(targets(), name),
+	}))
+	options.push(
+		{
+			id: 'group:new',
+			label: formatMessage(messages.groupNew),
+			icon: PlusIcon,
+			action: () => {
+				const items = targets()
+				modGroupNameModal.value?.show('create', '', async (name) => {
+					await modGroups.create(name)
+					await modGroups.move(items, name)
+				})
+			},
+		},
+		{ type: 'divider' },
+		{
+			id: 'group:none',
+			label: formatMessage(messages.groupRemoveFrom),
+			icon: FolderUpIcon,
+			action: () => void modGroups.move(targets(), null),
+		},
+	)
+	return options
+}
+
+function withGroupOptions(item: ContentItem, base: ButtonMenuOption[] | undefined) {
+	if (!modGroups || !modGroups.canGroup(item)) return base
+	const submenu: ButtonMenuOption = {
+		type: 'submenu',
+		id: 'move-to-group',
+		label: formatMessage(messages.groupMoveTo),
+		icon: FolderIcon,
+		options: groupMoveOptions(() => [item]),
+	}
+	return [...(base ?? []), submenu]
+}
+
+// Drag & drop між групами: тягнемо рядок (або все виділене, якщо рядок виділений)
+const draggingIds = ref<string[]>([])
+const dropTargetKey = ref<string | null>(null)
+
+function onRowDragStart(id: string, event: DragEvent) {
+	if (!modGroups) return
+	const ids = selectedIds.value.includes(id) ? selectedIds.value : [id]
+	const byId = new Map(ctx.items.value.map((item) => [getItemId(item), item]))
+	const items = ids
+		.map((itemId) => byId.get(itemId))
+		.filter((item): item is ContentItem => !!item && modGroups.canGroup(item))
+	if (items.length === 0) {
+		event.preventDefault()
+		return
+	}
+	draggingIds.value = items.map(getItemId)
+	if (event.dataTransfer) {
+		event.dataTransfer.effectAllowed = 'move'
+		event.dataTransfer.setData('text/plain', draggingIds.value.join('\n'))
+	}
+}
+
+function onRowDragEnd() {
+	draggingIds.value = []
+	dropTargetKey.value = null
+}
+
+function onSectionDragOver(section: GroupedSection, event: DragEvent) {
+	if (draggingIds.value.length === 0) return
+	event.preventDefault()
+	if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+	dropTargetKey.value = section.key
+}
+
+function onSectionDragLeave(section: GroupedSection, event: DragEvent) {
+	const next = event.relatedTarget as Node | null
+	if (next && (event.currentTarget as HTMLElement).contains(next)) return
+	if (dropTargetKey.value === section.key) dropTargetKey.value = null
+}
+
+async function onSectionDrop(section: GroupedSection, event: DragEvent) {
+	event.preventDefault()
+	if (!modGroups || draggingIds.value.length === 0) return
+	const ids = new Set(draggingIds.value)
+	const items = ctx.items.value.filter(
+		(item) => ids.has(getItemId(item)) && modGroups.groupOf(item) !== section.name,
+	)
+	onRowDragEnd()
+	if (items.length === 0) return
+	await modGroups.move(items, section.name)
+	clearSelection()
+}
+
+/** Те саме для панелі виділення: після переміщення знімаємо виділення. */
+function bulkGroupMoveOptions(): ButtonMenuLeafOption[] {
+	return groupMoveOptions(() => groupableSelectedItems.value).map((option) =>
+		option.type === 'divider' || option.type === 'heading' || !('action' in option)
+			? option
+			: {
+					...option,
+					action: async (event: MouseEvent) => {
+						await option.action(event)
+						clearSelection()
+					},
+				},
+	)
+}
 
 const hasOutdatedProjects = computed(() => {
 	const outdated = ctx.items.value.filter((p) => p.has_update && !p.locked)
@@ -963,9 +1170,34 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 
 				<template v-if="ctx.items.value.length > 0">
 					<div class="flex flex-col gap-2">
-						<span v-if="ctx.managedContent.value" class="mb-2 text-xl font-semibold text-contrast">
-							{{ formatMessage(messages.additionalContent) }}
-						</span>
+						<div v-if="ctx.managedContent.value" class="mb-2 flex flex-wrap items-center gap-3">
+							<span class="text-xl font-semibold text-contrast">
+								{{
+									formatMessage(
+										modGroups?.showManaged?.value
+											? messages.groupAllContent
+											: messages.additionalContent,
+									)
+								}}
+							</span>
+							<Button
+								v-if="modGroups?.showManaged"
+								type="transparent"
+								size="sm"
+								:class="modGroups.showManaged.value ? '!text-brand' : '!text-secondary'"
+								@click="modGroups.showManaged.value = !modGroups.showManaged.value"
+							>
+								<EyeIcon v-if="!modGroups.showManaged.value" />
+								<EyeOffIcon v-else />
+								{{
+									formatMessage(
+										modGroups.showManaged.value
+											? messages.groupHidePack
+											: messages.groupShowPack,
+									)
+								}}
+							</Button>
+						</div>
 
 						<div class="flex flex-wrap items-center gap-2">
 							<Input
@@ -1241,7 +1473,101 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 							</div>
 						</div>
 
+						<template v-if="modGroups">
+							<div class="mt-2 flex flex-col gap-3">
+								<section
+									v-for="section in groupedSections"
+									:key="section.key"
+									class="mod-group rounded-2xl border border-solid bg-surface-1 transition-colors"
+									:class="
+										dropTargetKey === section.key
+											? 'border-brand bg-brand-highlight'
+											: 'border-surface-4'
+									"
+									@dragover="onSectionDragOver(section, $event)"
+									@dragleave="onSectionDragLeave(section, $event)"
+									@drop="onSectionDrop(section, $event)"
+								>
+									<div class="flex items-center gap-2 px-3 py-2">
+										<button
+											type="button"
+											class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 bg-transparent p-0 text-left text-contrast"
+											:aria-expanded="!isGroupCollapsed(section.key)"
+											@click="toggleGroupCollapsed(section.key)"
+										>
+											<ChevronDownIcon
+												class="size-5 shrink-0 transition-transform"
+												:class="{ '-rotate-90': isGroupCollapsed(section.key) }"
+											/>
+											<FolderIcon v-if="section.name" class="size-5 shrink-0 text-secondary" />
+											<span class="truncate font-semibold">
+												{{ section.name ?? formatMessage(messages.groupUngrouped) }}
+											</span>
+											<span class="text-sm text-secondary">{{ section.items.length }}</span>
+										</button>
+										<template v-if="section.name">
+											<Button
+												v-tooltip="formatMessage(messages.groupRename)"
+												type="transparent"
+												size="sm"
+												icon-only
+												:aria-label="formatMessage(messages.groupRename)"
+												@click="promptRenameGroup(section.name)"
+											>
+												<PencilIcon />
+											</Button>
+											<Button
+												v-tooltip="formatMessage(messages.groupDissolveTooltip)"
+												type="transparent"
+												size="sm"
+												icon-only
+												:aria-label="formatMessage(messages.groupDissolve)"
+												@click="dissolveGroup(section.name)"
+											>
+												<FolderUpIcon />
+											</Button>
+										</template>
+									</div>
+									<div v-show="!isGroupCollapsed(section.key)" class="px-2 pb-2">
+										<ContentCardTable
+											v-model:selected-ids="selectedIds"
+											:items="section.items"
+											:highlighted-item-id="highlightedItemId"
+											:show-selection="true"
+											:virtualized="false"
+											hide-header
+											flat
+											draggable
+											class="mod-group__table"
+											@dragstart="onRowDragStart"
+											@dragend="onRowDragEnd"
+											@update:enabled="handleToggleEnabledById"
+											@delete="handleDeleteById"
+											@update="handleUpdateById"
+											@switch-version="handleSwitchVersionById"
+										>
+											<template #empty>
+												<span class="text-sm text-secondary">
+													{{
+														section.name
+															? formatMessage(messages.groupEmpty)
+															: formatMessage(messages.noContentFound)
+													}}
+												</span>
+											</template>
+										</ContentCardTable>
+									</div>
+								</section>
+								<div>
+									<Button type="outlined" @click="promptCreateGroup">
+										<PlusIcon />
+										{{ formatMessage(messages.groupNew) }}
+									</Button>
+								</div>
+							</div>
+						</template>
 						<ContentCardTable
+							v-else
 							v-model:selected-ids="selectedIds"
 							class="mt-2"
 							:items="tableItems"
@@ -1349,6 +1675,18 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 				</Button>
 
 				<TeleportOverflowMenu
+					v-if="modGroups && groupableSelectedItems.length > 0"
+					type="quiet"
+					:label="formatMessage(messages.groupMoveTo)"
+					:options="bulkGroupMoveOptions()"
+					class="!w-auto !px-2.5 !rounded-xl"
+				>
+					<FolderIcon />
+					<span class="bar-label">{{ formatMessage(messages.groupMoveTo) }}</span>
+					<DropdownIcon />
+				</TeleportOverflowMenu>
+
+				<TeleportOverflowMenu
 					v-if="ctx.shareItems"
 					type="quiet"
 					:label="formatMessage(commonMessages.moreOptionsButton)"
@@ -1415,6 +1753,8 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 			</template>
 		</ContentSelectionBar>
 
+		<ModGroupNameModal ref="modGroupNameModal" />
+
 		<ConfirmDeletionModal
 			ref="confirmDeletionModal"
 			:count="pendingDeletionItems.length"
@@ -1468,3 +1808,13 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 		<slot name="modals" />
 	</div>
 </template>
+
+<style scoped>
+.mod-group__table :deep([draggable='true']) {
+	cursor: grab;
+}
+
+.mod-group__table :deep([draggable='true']:active) {
+	cursor: grabbing;
+}
+</style>

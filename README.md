@@ -1,39 +1,45 @@
-# ![Modrinth Monorepo Cover](/.github/assets/monorepo_cover.png)
+# Terrarium Launcher
 
-![Issues](https://img.shields.io/github/issues-raw/Modrinth/code?color=c78aff&label=issues&style=for-the-badge)
-![Pull Requests](https://img.shields.io/github/issues-pr-raw/Modrinth/code?color=c78aff&label=PRs&style=for-the-badge)
-![Contributors](https://img.shields.io/github/contributors/Modrinth/code?color=c78aff&label=contributors&style=for-the-badge)
-![Lines of Code](https://img.shields.io/endpoint?url=https://loctopus.creeperkatze.dev/github/modrinth/code/badge?style=flat&logoColor=white&color=c78aff&style=for-the-badge)
-![Commit Activity](https://img.shields.io/github/commit-activity/m/Modrinth/code?color=c78aff&label=commits&style=for-the-badge)
-![Last Commit](https://img.shields.io/github/last-commit/Modrinth/code?color=c78aff&label=last%20commit&style=for-the-badge)
+<p align="center">
+  <img src="apps/app-frontend/src/assets/terrarium/logo.png" alt="Terrarium Create" width="360" />
+</p>
 
-## Modrinth Monorepo
+**Terrarium Launcher** — лаунчер Minecraft для приватного SMP-сервера спільноти **Terrarium Create**.
+Це форк [Modrinth App](https://github.com/modrinth/code) (theseus), доопрацьований під потреби одного конкретного сервера.
 
-Welcome to the Modrinth Monorepo, the primary codebase for the Modrinth web interface and app. It contains ![Lines of code](https://img.shields.io/endpoint?url=https://loctopus.creeperkatze.dev/github/modrinth/code/badge%3Fformat%3Dhuman&logoColor=white&color=black&label=) lines of code and has ![Contributors](https://img.shields.io/github/contributors/Modrinth/code?color=black&label=) contributors!
+> ⚠️ **Створено для гравців сервера Terrarium.**
+> Лаунчер налаштований на нашу збірку модів, наш Discord і наші правила. Якщо ти не граєш на сервері Terrarium — **не рекомендуємо його завантажувати**: тобі потрібен оригінальний [Modrinth App](https://modrinth.com/app).
+>
+> ⚠️ **Built for the Terrarium SMP community.** This is a fork of Modrinth App tailored to one private server (our modpack, Discord, rules). If you are not a Terrarium player, **do not install this** — get the official [Modrinth App](https://modrinth.com/app) instead.
 
-If you're not a developer and you've stumbled upon this repository, you can access the web interface on the [Modrinth website](https://modrinth.com) and download the latest release of the app [here](https://modrinth.com/app).
+## Що додано порівняно з Modrinth App
 
-## Development
+- Головна сторінка — запуск **нашої збірки** з GitHub-релізів, з автоматичними сповіщеннями про оновлення.
+- Клієнтська та серверна збірки; тестовий канал (pre-release) для адмінів і тестерів, «Поширити для всіх» одним натисканням.
+- Адмін публікує оновлення збірки прямо з лаунчера: вибір модів/конфігів, зміна ядра (NeoForge), назви та іконки.
+- Офлайн-акаунти (гра без входу через Microsoft).
+- Групи модів — справжні підпапки `mods/<Група>/` з акордеонами, drag & drop; на час гри розкладаються в корінь і повертаються назад.
+- Власне оформлення: синьо-жовта гама, карусель фото сервера, посилання на правила та Discord.
 
-This repository contains two primary packages. For detailed development information, please refer to their respective guides:
+Усе інше — стандартний функціонал Modrinth App: пошук модів і збірок на Modrinth, скіни, скриншоти, бібліотека примірників.
 
-- [Website frontend](https://docs.modrinth.com/contributing/knossos/)
-- [Desktop app](https://docs.modrinth.com/contributing/theseus/)
+## Завантаження
 
-## Contributing
+Готові збірки лаунчера — у [Releases](../../releases). Установник для Windows не підписаний сертифікатом, тому SmartScreen може показати попередження — «Докладніше → Виконати все одно».
 
-We welcome contributions! Before submitting any contributions, please read our [contributing guidelines](https://docs.modrinth.com/contributing/getting-started/).
+Дані лаунчера зберігаються окремо від Modrinth App (`%APPDATA%\TerrariumLauncher`), обидва можуть стояти поруч.
 
-If you plan to fork this repository for your own purposes, please review our [copying guidelines](COPYING.md).
+## Розробка
 
-## Security
+```
+scripts\dev\start.cmd      # dev-режим (Tauri + Vite, гаряче перезавантаження)
+pnpm app:build             # збірка установника (target/release/bundle)
+```
 
-If you discover a security vulnerability within our codebase, please follow our [responsible disclosure guidelines](https://modrinth.com/legal/security).
+Вимоги ті самі, що й у Modrinth App: Node 20+, pnpm, Rust stable. Огляд архітектури наших змін — у `docs-terrarium/ARCHITECTURE.md` та в коментарях модулів `packages/app-lib/src/api/terrarium.rs`, `…/state/instances/commands/mod_groups.rs`.
 
-## Support
+## Ліцензія та подяки
 
-If you need help with the Modrinth web interface or app, please visit our [support page](https://support.modrinth.com). For general inquiries, you can also join our [Discord server](https://discord.modrinth.com).
+Код лаунчера — [GNU GPL v3](apps/app/LICENSE), як і Modrinth App, з якого він походить. Modrinth — торгова марка Rinth, Inc.; цей проєкт не пов'язаний з Modrinth і не підтримується ними. Дякуємо команді Modrinth за відкритий код.
 
-## License
-
-All packages in this repository are licensed under their respective licenses. Refer to the LICENSE file in each package for more information.
+Launcher powered by [Modrinth](https://modrinth.com).

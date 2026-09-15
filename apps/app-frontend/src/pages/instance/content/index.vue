@@ -118,6 +118,7 @@ import {
 	versionChangesGameVersion,
 } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useSessionStorage } from '@vueuse/core'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openUrl } from '@tauri-apps/plugin-opener'
@@ -150,6 +151,14 @@ import {
 import { type InstanceContentData, loadInstanceContentData } from '@/helpers/instance-content'
 import { get as getSettings, set as setSettings } from '@/helpers/settings'
 import { set_synced_pack_enabled, syncedPackKeys } from '@/helpers/synced-packs'
+import {
+	modGroupOf,
+	terrarium_create_mod_group,
+	terrarium_delete_mod_group,
+	terrarium_list_mod_groups,
+	terrarium_rename_mod_group,
+	terrarium_set_mod_group,
+} from '@/helpers/terrarium'
 import type { CacheBehaviour } from '@/helpers/types'
 import { highlightModInInstance } from '@/helpers/utils.js'
 import { type AppEventPayload, injectAppEvents } from '@/providers/app-events'
@@ -504,7 +513,11 @@ const managedContent = computed<ManagedContentData | null>(() => {
 					: undefined,
 			},
 			summary: managedContentSummary.value,
-			versionNumber: linkedModpackVersion.value?.version_number,
+			versionNumber:
+				linkedModpackVersion.value?.version_number ??
+				(instance.value.link?.type === 'imported_modpack'
+					? (instance.value.link.version_number ?? undefined)
+					: undefined),
 			versionLink:
 				linkedModpackProject.value && linkedModpackVersion.value
 					? {
@@ -1524,6 +1537,53 @@ const packActions = useSyncedPackActions(instance, syncedContentModal, canMutate
 	refreshContentState('must_revalidate'),
 )
 
+// Terrarium: групи модів — підпапки mods/<Група>/ (акордеони в списку)
+const modGroupNames = ref<string[]>([])
+
+async function refreshModGroups() {
+	if (!instance.value) return
+	const groups = await terrarium_list_mod_groups(instance.value.id).catch(() => [])
+	modGroupNames.value = groups.map((group) => group.name)
+}
+
+async function afterModGroupChange() {
+	await refreshModGroups()
+	await initProjects('must_revalidate')
+}
+
+const modGroups = {
+	groups: modGroupNames,
+	groupOf: (item: ContentItem) => modGroupOf(item.file_path),
+	canGroup: (item: ContentItem) =>
+		item.project_type === 'mod' && !!item.file_path && canMutateContent(item),
+	create: async (name: string) => {
+		await terrarium_create_mod_group(instance.value.id, name)
+		await refreshModGroups()
+	},
+	rename: async (oldName: string, newName: string) => {
+		await terrarium_rename_mod_group(instance.value.id, oldName, newName)
+		await afterModGroupChange()
+	},
+	remove: async (name: string) => {
+		try {
+			await terrarium_delete_mod_group(instance.value.id, name)
+		} catch (error) {
+			handleError(error)
+		}
+		await afterModGroupChange()
+	},
+	move: async (items: ContentItem[], group: string | null) => {
+		const paths = items.map((item) => item.file_path).filter((path): path is string => !!path)
+		if (paths.length === 0) return
+		try {
+			await terrarium_set_mod_group(instance.value.id, paths, group)
+		} catch (error) {
+			handleError(error)
+		}
+		await afterModGroupChange()
+	},
+}
+
 function getOverflowOptions(item: ContentItem): ButtonMenuOption[] {
 	const options: ButtonMenuOption[] = packActions.overflowOptions(item)
 
@@ -1597,6 +1657,7 @@ function applyContentData(contentData: InstanceContentData) {
 	if (contentData.path !== instance.value.id) {
 		return false
 	}
+	void refreshModGroups()
 
 	if (!contentData.contentItems) {
 		loading.value = false
@@ -1627,8 +1688,21 @@ function contentVersionLabel(item: ContentItem): string {
 	return formatMessage(commonMessages.unknownLabel)
 }
 
+// Terrarium: за замовчуванням у списку лише власний уміст гравця; моди збірки
+// можна підмішати перемикачем (щоб і їх розкласти по групах).
+const showPackContentInList = useSessionStorage(
+	`content-show-pack:${instance.value.id}`,
+	false,
+)
+const listItems = computed<ContentItem[]>(() =>
+	showPackContentInList.value
+		? dedupeManagedContentItems([...mergedProjects.value, ...managedContentItems.value])
+		: mergedProjects.value,
+)
+
 provideContentManager({
-	items: mergedProjects,
+	items: listItems,
+	modGroups: { ...modGroups, showManaged: showPackContentInList },
 	loading,
 	error: ref(null),
 	managedContent,

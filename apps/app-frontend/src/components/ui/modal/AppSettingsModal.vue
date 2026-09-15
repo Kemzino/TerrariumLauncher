@@ -12,6 +12,7 @@ import {
 	ShieldIcon,
 	ToggleRightIcon,
 	UserIcon,
+	WrenchIcon,
 } from '@modrinth/assets'
 import {
 	commonMessages,
@@ -40,6 +41,7 @@ import LanguageSettings from '@/components/ui/settings/display/LanguageSettings.
 import InstancesSyncedSettings from '@/components/ui/settings/instances/instances-synced-settings/index.vue'
 import JavaSettings from '@/components/ui/settings/instances/JavaSettings.vue'
 import ResourceManagementSettings from '@/components/ui/settings/instances/ResourceManagementSettings.vue'
+import TerrariumSettings from '@/components/ui/settings/terrarium/TerrariumSettings.vue'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { appSettingsKeys, appSettingsQueryOptions, set } from '@/helpers/settings.ts'
 import {
@@ -74,6 +76,10 @@ const tabCategories = defineMessages({
 	instances: {
 		id: 'app.settings.sidebar.label.instances',
 		defaultMessage: 'Instances',
+	},
+	terrarium: {
+		id: 'terrarium.settings.sidebar.label',
+		defaultMessage: 'Terrarium',
 	},
 })
 
@@ -169,6 +175,15 @@ const tabs = [
 		category: tabCategories.instances,
 		icon: GaugeIcon,
 		content: ResourceManagementSettings,
+	},
+	{
+		name: defineMessage({
+			id: 'terrarium.settings.tabs.admin',
+			defaultMessage: 'Збірка та адмін-ключ',
+		}),
+		category: tabCategories.terrarium,
+		icon: WrenchIcon,
+		content: TerrariumSettings,
 	},
 ]
 

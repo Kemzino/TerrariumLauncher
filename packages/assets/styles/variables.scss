@@ -473,3 +473,76 @@ html {
 
 	--brand-gradient-strong-bg: #3a3b38;
 }
+
+/* ---------------------------------------------------------------------------
+ * Terrarium: синьо-жовта палітра поверх базових тем Modrinth.
+ * Блок стоїть останнім, тому перекриває однойменні змінні вище.
+ * Темна тема — глибокий синій із жовтим акцентом; світла — небесно-блакитна
+ * із синім акцентом і жовтими підсвітками.
+ * ------------------------------------------------------------------------- */
+.light-mode,
+.light,
+:root[data-theme='light'] {
+	--surface-1: #dfe9f7;
+	--surface-1-5: #e4edf9;
+	--surface-2: #ebf2fb;
+	--surface-2-5: #e7eff9;
+	--surface-3: #f2f7fd;
+	--surface-4: #ffffff;
+	--surface-5: #c5d5ec;
+
+	--color-text-primary: #0b1a33;
+	--color-text-default: #1b2b47;
+	--color-text-tertiary: #4d5f7c;
+
+	--color-scrollbar: #9fb3d1;
+	--color-button-border: rgba(31, 95, 214, 0.14);
+
+	--color-brand: #1f5fd6;
+	--color-brand-highlight: rgba(31, 95, 214, 0.18);
+	--color-brand-shadow: rgba(31, 95, 214, 0.55);
+	--color-accent-contrast: #ffffff;
+	--loading-bar-gradient: linear-gradient(to right, var(--color-brand) 0%, #ffd23f 100%);
+	--color-gradient-button-bg: linear-gradient(180deg, #ffffff 0%, #dce7f7 100%);
+
+	--brand-gradient-fade-out-color: linear-gradient(to bottom, rgba(223, 233, 247, 0), #d6e3f5 70%);
+	--splash-tint-top: rgba(255, 210, 63, 0.35);
+	--splash-tint-bottom: rgba(31, 95, 214, 0.3);
+	--splash-overlay: rgba(223, 233, 247, 0.35);
+
+	--terrarium-yellow: #f2b705;
+	--terrarium-yellow-soft: rgba(242, 183, 5, 0.18);
+	--terrarium-glass: rgba(242, 247, 253, 0.72);
+}
+
+.dark-mode,
+.dark,
+:root[data-theme='dark'] {
+	--surface-1: #0b1526;
+	--surface-1-5: #0e1a2e;
+	--surface-2: #111f36;
+	--surface-2-5: #15253f;
+	--surface-3: #192b47;
+	--surface-4: #22375a;
+	--surface-5: #2f4770;
+
+	--color-text-primary: #f4f7fc;
+	--color-text-default: #dfe7f5;
+	--color-text-tertiary: #9fb0cb;
+
+	--color-divider-dark: #3c5580;
+	--color-button-border: rgba(159, 176, 203, 0.14);
+
+	--color-brand: #ffd23f;
+	--color-brand-highlight: rgba(255, 210, 63, 0.22);
+	--color-brand-shadow: rgba(255, 210, 63, 0.5);
+	--color-accent-contrast: #0b1526;
+	--loading-bar-gradient: linear-gradient(to right, #1f5fd6 0%, var(--color-brand) 100%);
+	--color-gradient-button-bg: linear-gradient(180deg, #22375a 0%, #192b47 100%);
+
+	--brand-gradient-fade-out-color: linear-gradient(to bottom, rgba(11, 21, 38, 0), #0b1526 80%);
+
+	--terrarium-yellow: #ffd23f;
+	--terrarium-yellow-soft: rgba(255, 210, 63, 0.16);
+	--terrarium-glass: rgba(11, 21, 38, 0.62);
+}

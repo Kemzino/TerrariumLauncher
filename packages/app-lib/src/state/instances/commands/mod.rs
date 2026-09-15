@@ -53,3 +53,12 @@ pub(crate) use self::shared_instance::{
     attach_shared_instance, clear_shared_instance, mark_shared_instance_stale,
     quarantine_shared_instance, set_shared_instance_sync_status,
 };
+
+pub(crate) mod mod_groups;
+pub use self::mod_groups::{ContentGroup, FlattenReason, flat_path, group_of};
+pub(crate) use self::mod_groups::{
+    apply_pack_groups, create_mod_group, delete_mod_group, flatten_mods,
+    FLATTEN_FILE, PACK_GROUPS_FILE, README_FILE, flatten_for_pack_update,
+    flatten_reason, list_mod_groups, rename_mod_group,
+    restore_after_pack_update, restore_mods, set_mod_group,
+};
