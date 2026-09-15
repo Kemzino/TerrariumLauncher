@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use crate::api::Result;
 use tauri::plugin::TauriPlugin;
 use theseus::terrarium::{
-    self, AdminInfo, Channel, ContentGroup, PackKind, PublishPreview, PublishRequest, PublishedRelease,
-    TerrariumRelease, TerrariumState,
+    self, AdminInfo, Channel, ContentGroup, PackKind, PublishPreview,
+    PublishRequest, PublishedRelease, TerrariumRelease, TerrariumState,
 };
+use theseus::terrarium_sync::{self, SyncPreview, SyncRequest, SyncResult};
 
 pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
     tauri::plugin::Builder::new("terrarium")
@@ -25,6 +26,8 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             terrarium_delete_mod_group,
             terrarium_set_mod_group,
             terrarium_promote_release,
+            terrarium_sync_preview,
+            terrarium_sync_apply,
         ])
         .build()
 }
@@ -44,7 +47,10 @@ pub async fn terrarium_fetch_latest_release(
     pack: PackKind,
     channel: Option<Channel>,
 ) -> Result<TerrariumRelease> {
-    Ok(terrarium::fetch_latest_release(pack, channel.unwrap_or_default()).await?)
+    Ok(
+        terrarium::fetch_latest_release(pack, channel.unwrap_or_default())
+            .await?,
+    )
 }
 
 #[tauri::command]
@@ -53,6 +59,22 @@ pub async fn terrarium_promote_release(
     release_id: u64,
 ) -> Result<TerrariumRelease> {
     Ok(terrarium::promote_release(pack, release_id).await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_sync_preview(
+    source_instance_id: String,
+    target_instance_id: String,
+) -> Result<SyncPreview> {
+    Ok(
+        terrarium_sync::sync_preview(source_instance_id, target_instance_id)
+            .await?,
+    )
+}
+
+#[tauri::command]
+pub async fn terrarium_sync_apply(request: SyncRequest) -> Result<SyncResult> {
+    Ok(terrarium_sync::sync_apply(request).await?)
 }
 
 #[tauri::command]
@@ -83,7 +105,9 @@ pub async fn terrarium_publish_preview(
 }
 
 #[tauri::command]
-pub async fn terrarium_apply_pack_branding(instance_id: String) -> Result<bool> {
+pub async fn terrarium_apply_pack_branding(
+    instance_id: String,
+) -> Result<bool> {
     Ok(terrarium::apply_pack_branding(instance_id).await?)
 }
 

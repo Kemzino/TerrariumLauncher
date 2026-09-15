@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+	ArrowLeftRightIcon,
 	BookOpenIcon,
 	ChevronDownIcon,
 	DiscordIcon,
@@ -27,6 +28,7 @@ import AccountsCard from '@/components/ui/AccountsCard.vue'
 import TerrariumBackdrop from '@/components/ui/TerrariumBackdrop.vue'
 import TerrariumInstancePicker from '@/components/ui/TerrariumInstancePicker.vue'
 import TerrariumPublishModal from '@/components/ui/TerrariumPublishModal.vue'
+import TerrariumSyncModal from '@/components/ui/TerrariumSyncModal.vue'
 import { useAppEvent } from '@/composables/use-app-event'
 import { handleSevereError } from '@/composables/use-error.js'
 import { useTerrariumState } from '@/composables/use-terrarium-state'
@@ -42,6 +44,7 @@ import { get_by_instance_id } from '@/helpers/process'
 import {
 	type Channel,
 	type PackKind,
+	packStateKey,
 	type PublishedRelease,
 	terrarium_apply_pack_branding,
 	terrarium_download_release,
@@ -119,6 +122,15 @@ const messages = defineMessages({
 	mods: { id: 'terrarium.hero.mods', defaultMessage: 'Мої моди' },
 	modsServer: { id: 'terrarium.hero.mods-server', defaultMessage: 'Моди сервера' },
 	publish: { id: 'terrarium.hero.publish', defaultMessage: 'Опублікувати оновлення' },
+	sync: { id: 'terrarium.hero.sync', defaultMessage: 'Синхронізувати' },
+	syncTooltip: {
+		id: 'terrarium.hero.sync-tooltip',
+		defaultMessage: 'Перенести групи модів і конфіги між клієнтською та серверною збірками',
+	},
+	syncNeedBoth: {
+		id: 'terrarium.hero.sync-need-both',
+		defaultMessage: 'Щоб синхронізувати, встанови і клієнтську, і серверну збірку',
+	},
 	adminBadge: { id: 'terrarium.hero.admin-badge', defaultMessage: 'Адмін' },
 	packClient: { id: 'terrarium.hero.pack-client', defaultMessage: 'Клієнт' },
 	packServer: { id: 'terrarium.hero.pack-server', defaultMessage: 'Сервер' },
@@ -160,6 +172,7 @@ const messages = defineMessages({
 })
 
 const {
+	state: terrariumState,
 	activePack,
 	activeChannel,
 	activePackState: packState,
@@ -204,6 +217,26 @@ const installedTag = computed<string | null>(() => {
 	return packState.value.installed_tag
 })
 const publishModal = ref<InstanceType<typeof TerrariumPublishModal> | null>(null)
+const syncModal = ref<InstanceType<typeof TerrariumSyncModal> | null>(null)
+// Синхронізація працює з примірниками поточного каналу; якщо в каналі збірки
+// немає — беремо стабільну
+function packInstanceId(kind: PackKind): string | null {
+	const s = terrariumState.value
+	const inChannel = s[packStateKey(kind, activeChannel.value)].instance_id
+	return inChannel ?? s[packStateKey(kind, 'stable')].instance_id
+}
+const syncClientId = computed(() => packInstanceId('client'))
+const syncServerId = computed(() => packInstanceId('server'))
+const canSync = computed(() => !!syncClientId.value && !!syncServerId.value)
+
+function openSync() {
+	if (!syncClientId.value || !syncServerId.value) return
+	syncModal.value?.show(syncClientId.value, syncServerId.value)
+}
+
+async function onSynced() {
+	await queryClient.invalidateQueries({ queryKey: instanceKeys.list() })
+}
 // Будь-хто може прив'язати вже наявний примірник як «збірку Terrarium», а не качати її знову
 const linkableInstances = computed(() => instancesQuery.data.value ?? [])
 const updateAvailable = computed(
@@ -405,7 +438,7 @@ async function update() {
 }
 
 async function play() {
-	if (!instance.value || isServer.value) return
+	if (!instance.value) return
 	busy.value = 'launching'
 	try {
 		await run(instance.value.id)
@@ -698,11 +731,11 @@ onMounted(async () => {
 						>
 							<RefreshCwIcon /> {{ formatMessage(messages.update) }}
 						</Button>
-						<Button v-if="!isServer" size="xl" :disabled="!!busy" @click="play">
+						<Button size="xl" :disabled="!!busy" @click="play">
 							<PlayIcon /> {{ formatMessage(messages.playOld) }}
 						</Button>
 					</template>
-					<template v-else-if="!isServer">
+					<template v-else>
 						<Button
 							type="colored"
 							color="brand"
@@ -719,8 +752,10 @@ onMounted(async () => {
 						<PackageOpenIcon />
 						{{ isServer ? formatMessage(messages.modsServer) : formatMessage(messages.mods) }}
 					</Button>
+					<!-- Публікацію з лаунчера поки сховано: релізи збірки закидаються руками.
+					     Код лишається — повернути: прибрати `false &&`. -->
 					<Button
-						v-if="isAdmin && installed"
+						v-if="false && isAdmin && installed"
 						v-tooltip="playing ? formatMessage(messages.publishWhilePlaying) : undefined"
 						size="xl"
 						:type="isServer && !updateAvailable ? 'colored' : 'base'"
@@ -729,6 +764,17 @@ onMounted(async () => {
 						@click="openPublish"
 					>
 						<RocketIcon /> {{ formatMessage(messages.publish) }}
+					</Button>
+					<Button
+						v-if="isAdmin"
+						v-tooltip="
+							canSync ? formatMessage(messages.syncTooltip) : formatMessage(messages.syncNeedBoth)
+						"
+						size="xl"
+						:disabled="!!busy || playing || !canSync"
+						@click="openSync"
+					>
+						<ArrowLeftRightIcon /> {{ formatMessage(messages.sync) }}
 					</Button>
 					<Button
 						v-if="isAdmin && hasTestRelease"
@@ -787,7 +833,7 @@ onMounted(async () => {
 						<GithubIcon />
 					</button>
 				</div>
-				<aside v-if="!isServer" class="terrarium-hero__account">
+				<aside class="terrarium-hero__account">
 					<h3 class="terrarium-hero__account-title">{{ formatMessage(messages.playingAs) }}</h3>
 					<Suspense>
 						<AccountsCard />
@@ -802,6 +848,7 @@ onMounted(async () => {
 		</div>
 
 		<TerrariumPublishModal ref="publishModal" @published="onPublished" />
+		<TerrariumSyncModal ref="syncModal" @synced="onSynced" />
 	</section>
 </template>
 

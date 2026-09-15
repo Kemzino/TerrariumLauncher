@@ -1149,7 +1149,7 @@ pub async fn publish_preview(
     })
 }
 
-fn sha1_of(path: &Path) -> std::io::Result<String> {
+pub(crate) fn sha1_of(path: &Path) -> std::io::Result<String> {
     use std::io::Read;
     let mut file = std::fs::File::open(path)?;
     let mut hasher = sha1_smol::Sha1::new();

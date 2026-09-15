@@ -138,6 +138,50 @@ export interface PublishedRelease {
 	asset_name: string
 }
 
+// ---------------------------------------------------------------------------
+// Синхронізація між клієнтською та серверною збірками (адмін)
+
+export type SyncKind = 'mod_group' | 'config'
+
+export interface SyncEntry {
+	kind: SyncKind
+	/** Назва групи (`''` — без групи) або шлях конфігу (`config/jei`, `kubejs`) */
+	key: string
+	name: string
+	files: number
+	new_files: number
+	changed_files: number
+	size: number
+}
+
+export interface SyncPreview {
+	groups: SyncEntry[]
+	configs: SyncEntry[]
+}
+
+export interface SyncRequest {
+	source_instance_id: string
+	target_instance_id: string
+	groups: string[]
+	configs: string[]
+}
+
+export interface SyncResult {
+	copied: number
+	skipped_same: number
+}
+
+export async function terrarium_sync_preview(sourceInstanceId: string, targetInstanceId: string) {
+	return await invoke<SyncPreview>('plugin:terrarium|terrarium_sync_preview', {
+		sourceInstanceId,
+		targetInstanceId,
+	})
+}
+
+export async function terrarium_sync_apply(request: SyncRequest) {
+	return await invoke<SyncResult>('plugin:terrarium|terrarium_sync_apply', { request })
+}
+
 export async function terrarium_verify_admin_token(token: string) {
 	return await invoke<AdminInfo>('plugin:terrarium|terrarium_verify_admin_token', { token })
 }

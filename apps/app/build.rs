@@ -359,6 +359,8 @@ fn main() {
                         "terrarium_delete_mod_group",
                         "terrarium_set_mod_group",
                         "terrarium_promote_release",
+                        "terrarium_sync_preview",
+                        "terrarium_sync_apply",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
