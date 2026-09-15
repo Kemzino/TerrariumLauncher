@@ -101,6 +101,10 @@ const messages = defineMessages({
 	},
 	groupShowPack: { id: 'content.mod-groups.show-pack', defaultMessage: 'Показати моди збірки' },
 	groupHidePack: { id: 'content.mod-groups.hide-pack', defaultMessage: 'Лише мій уміст' },
+	dragGhostMany: {
+		id: 'content.mod-groups.drag-ghost-many',
+		defaultMessage: '{name} та ще {count}',
+	},
 	loadingContent: {
 		id: 'content.page-layout.loading',
 		defaultMessage: 'Loading content...',
@@ -610,58 +614,109 @@ function withGroupOptions(item: ContentItem, base: ButtonMenuOption[] | undefine
 	return [...(base ?? []), submenu]
 }
 
-// Drag & drop між групами: тягнемо рядок (або все виділене, якщо рядок виділений)
+// Drag & drop між групами: тягнемо рядок (або все виділене, якщо рядок виділений).
+// Не HTML5 DnD: у Tauri на Windows WebView2 віддає drag-події системному обробнику
+// дропу файлів (потрібен для кидання .jar у вкладку), тому працюємо на pointer-подіях.
+const DRAG_THRESHOLD_PX = 6
 const draggingIds = ref<string[]>([])
 const dropTargetKey = ref<string | null>(null)
+const dragGhost = ref<{ x: number; y: number; label: string } | null>(null)
+let pendingDrag: { id: string; x: number; y: number } | null = null
+let dragHappened = false
 
-function onRowDragStart(id: string, event: DragEvent) {
-	if (!modGroups) return
+function draggableItemsFor(id: string): ContentItem[] {
+	if (!modGroups) return []
 	const ids = selectedIds.value.includes(id) ? selectedIds.value : [id]
 	const byId = new Map(ctx.items.value.map((item) => [getItemId(item), item]))
-	const items = ids
+	return ids
 		.map((itemId) => byId.get(itemId))
 		.filter((item): item is ContentItem => !!item && modGroups.canGroup(item))
-	if (items.length === 0) {
-		event.preventDefault()
-		return
+}
+
+function onTablePointerDown(event: PointerEvent) {
+	if (!modGroups || event.button !== 0 || pendingDrag) return
+	const target = event.target as HTMLElement | null
+	// Кнопки, чекбокси, посилання й меню всередині рядка працюють як раніше
+	if (!target || target.closest('button, a, input, label, [role="menu"], [role="menuitem"]')) return
+	const row = target.closest<HTMLElement>('[data-drag-id]')
+	if (!row?.dataset.dragId) return
+	pendingDrag = { id: row.dataset.dragId, x: event.clientX, y: event.clientY }
+	dragHappened = false
+	window.addEventListener('pointermove', onDragPointerMove)
+	window.addEventListener('pointerup', onDragPointerUp)
+	window.addEventListener('pointercancel', cancelDrag)
+}
+
+function onDragPointerMove(event: PointerEvent) {
+	if (!pendingDrag) return
+	if (draggingIds.value.length === 0) {
+		if (
+			Math.abs(event.clientX - pendingDrag.x) < DRAG_THRESHOLD_PX &&
+			Math.abs(event.clientY - pendingDrag.y) < DRAG_THRESHOLD_PX
+		) {
+			return
+		}
+		const items = draggableItemsFor(pendingDrag.id)
+		if (items.length === 0) {
+			cancelDrag()
+			return
+		}
+		draggingIds.value = items.map(getItemId)
+		dragHappened = true
+		const first = items[0].project?.title ?? items[0].file_name
+		dragGhost.value = {
+			x: event.clientX,
+			y: event.clientY,
+			label:
+				items.length > 1
+					? formatMessage(messages.dragGhostMany, { name: first, count: items.length - 1 })
+					: first,
+		}
+		document.body.classList.add('mod-group-dragging')
+		window.getSelection()?.removeAllRanges()
 	}
-	draggingIds.value = items.map(getItemId)
-	if (event.dataTransfer) {
-		event.dataTransfer.effectAllowed = 'move'
-		event.dataTransfer.setData('text/plain', draggingIds.value.join('\n'))
-	}
-}
-
-function onRowDragEnd() {
-	draggingIds.value = []
-	dropTargetKey.value = null
-}
-
-function onSectionDragOver(section: GroupedSection, event: DragEvent) {
-	if (draggingIds.value.length === 0) return
 	event.preventDefault()
-	if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-	dropTargetKey.value = section.key
+	dragGhost.value = { ...dragGhost.value!, x: event.clientX, y: event.clientY }
+	const under = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
+	dropTargetKey.value = under?.closest<HTMLElement>('[data-group-key]')?.dataset.groupKey ?? null
 }
 
-function onSectionDragLeave(section: GroupedSection, event: DragEvent) {
-	const next = event.relatedTarget as Node | null
-	if (next && (event.currentTarget as HTMLElement).contains(next)) return
-	if (dropTargetKey.value === section.key) dropTargetKey.value = null
-}
-
-async function onSectionDrop(section: GroupedSection, event: DragEvent) {
-	event.preventDefault()
-	if (!modGroups || draggingIds.value.length === 0) return
+async function onDragPointerUp() {
+	const targetKey = dropTargetKey.value
 	const ids = new Set(draggingIds.value)
+	const wasDragging = ids.size > 0
+	cancelDrag()
+	if (!wasDragging || !modGroups || targetKey === null) return
+	const section = groupedSections.value.find((s) => s.key === targetKey)
+	if (!section) return
 	const items = ctx.items.value.filter(
 		(item) => ids.has(getItemId(item)) && modGroups.groupOf(item) !== section.name,
 	)
-	onRowDragEnd()
 	if (items.length === 0) return
 	await modGroups.move(items, section.name)
 	clearSelection()
 }
+
+function cancelDrag() {
+	pendingDrag = null
+	draggingIds.value = []
+	dropTargetKey.value = null
+	dragGhost.value = null
+	document.body.classList.remove('mod-group-dragging')
+	window.removeEventListener('pointermove', onDragPointerMove)
+	window.removeEventListener('pointerup', onDragPointerUp)
+	window.removeEventListener('pointercancel', cancelDrag)
+}
+
+/** Після перетягування рядок не має спрацьовувати як клік (виділення/відкриття). */
+function onTableClickCapture(event: MouseEvent) {
+	if (!dragHappened) return
+	dragHappened = false
+	event.stopPropagation()
+	event.preventDefault()
+}
+
+onBeforeUnmount(cancelDrag)
 
 /** Те саме для панелі виділення: після переміщення знімаємо виділення. */
 function bulkGroupMoveOptions(): ButtonMenuLeafOption[] {
@@ -1191,9 +1246,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 								<EyeOffIcon v-else />
 								{{
 									formatMessage(
-										modGroups.showManaged.value
-											? messages.groupHidePack
-											: messages.groupShowPack,
+										modGroups.showManaged.value ? messages.groupHidePack : messages.groupShowPack,
 									)
 								}}
 							</Button>
@@ -1484,9 +1537,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 											? 'border-brand bg-brand-highlight'
 											: 'border-surface-4'
 									"
-									@dragover="onSectionDragOver(section, $event)"
-									@dragleave="onSectionDragLeave(section, $event)"
-									@drop="onSectionDrop(section, $event)"
+									:data-group-key="section.key"
 								>
 									<div class="flex items-center gap-2 px-3 py-2">
 										<button
@@ -1539,8 +1590,8 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 											flat
 											draggable
 											class="mod-group__table"
-											@dragstart="onRowDragStart"
-											@dragend="onRowDragEnd"
+											@pointerdown="onTablePointerDown"
+											@click.capture="onTableClickCapture"
 											@update:enabled="handleToggleEnabledById"
 											@delete="handleDeleteById"
 											@update="handleUpdateById"
@@ -1805,16 +1856,32 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 			@unlink="ctx.unlinkModpack!()"
 		/>
 
+		<Teleport to="body">
+			<div
+				v-if="dragGhost"
+				class="mod-group-drag-ghost pointer-events-none fixed z-[9999] max-w-[320px] truncate rounded-xl border border-solid border-brand bg-surface-2 px-3 py-2 text-sm font-semibold text-contrast shadow-lg"
+				:style="{ left: `${dragGhost.x + 12}px`, top: `${dragGhost.y + 12}px` }"
+			>
+				{{ dragGhost.label }}
+			</div>
+		</Teleport>
+
 		<slot name="modals" />
 	</div>
 </template>
 
 <style scoped>
-.mod-group__table :deep([draggable='true']) {
+.mod-group__table :deep([data-drag-id]) {
 	cursor: grab;
+	touch-action: none;
 }
+</style>
 
-.mod-group__table :deep([draggable='true']:active) {
-	cursor: grabbing;
+<style>
+/* Під час перетягування модів між групами: без виділення тексту, курсор «тягну» */
+body.mod-group-dragging,
+body.mod-group-dragging * {
+	user-select: none !important;
+	cursor: grabbing !important;
 }
 </style>
