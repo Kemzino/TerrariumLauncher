@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 
 export type PackKind = 'client' | 'server'
-/** Канал релізів: stable — для всіх; test — pre-release, бачать адміни й тестери */
+/** Канал релізів: stable — публічний репо, для всіх; test — приватний репо, бачать адміни й тестери */
 export type Channel = 'stable' | 'test'
 export type AccessRole = 'admin' | 'tester'
 
@@ -28,7 +28,11 @@ export function packStateKey(pack: PackKind, channel: Channel) {
 
 export interface TerrariumRelease {
 	pack: PackKind
+	/** З якого каналу (репозиторію) взято реліз */
+	channel: Channel
+	repo: string
 	id: number
+	/** Тестовий реліз, якого ще нема в стабільному репо — можна «поширити для всіх» */
 	prerelease: boolean
 	html_url: string
 	tag: string
@@ -56,7 +60,7 @@ export async function terrarium_fetch_latest_release(pack: PackKind, channel: Ch
 	})
 }
 
-/** «Поширити для всіх»: тестовий реліз стає звичайним (latest). */
+/** «Поширити для всіх»: реліз копіюється з приватного тест-репо у стабільний. */
 export async function terrarium_promote_release(pack: PackKind, releaseId: number) {
 	return await invoke<TerrariumRelease>('plugin:terrarium|terrarium_promote_release', {
 		pack,
@@ -75,6 +79,10 @@ export interface AdminInfo {
 	server_repo: string
 	can_push_server: boolean
 	can_read_server: boolean
+	client_test_repo: string
+	server_test_repo: string
+	/** Читає приватний тестовий репо → тестер */
+	can_read_test: boolean
 	role: AccessRole | null
 }
 

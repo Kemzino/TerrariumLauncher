@@ -21,6 +21,11 @@ use crate::util::io;
 pub const CLIENT_REPO: &str = "Kemzino/TerrariumCreate";
 /// Репозиторій серверної збірки — редагує лише адмін, гравцям не показується.
 pub const SERVER_REPO: &str = "Kemzino/TerrariumCreateServer";
+/// Тестові версії живуть в окремих **приватних** репозиторіях: бета не видна
+/// нікому, крім тих, кому дали доступ. «Поширити для всіх» копіює реліз
+/// звідси у відповідний стабільний репозиторій.
+pub const CLIENT_TEST_REPO: &str = "Kemzino/TerrariumCreateTest";
+pub const SERVER_TEST_REPO: &str = "Kemzino/TerrariumCreateServerTest";
 
 /// Токен лише на читання репозиторіїв — щоб гравці могли бачити релізи
 /// приватного репозиторію. Задається у `.env` як `TERRARIUM_READ_TOKEN` під час
@@ -44,10 +49,12 @@ pub enum PackKind {
 }
 
 impl PackKind {
-    pub fn repo(self) -> &'static str {
-        match self {
-            PackKind::Client => CLIENT_REPO,
-            PackKind::Server => SERVER_REPO,
+    pub fn repo(self, channel: Channel) -> &'static str {
+        match (self, channel) {
+            (PackKind::Client, Channel::Stable) => CLIENT_REPO,
+            (PackKind::Server, Channel::Stable) => SERVER_REPO,
+            (PackKind::Client, Channel::Test) => CLIENT_TEST_REPO,
+            (PackKind::Server, Channel::Test) => SERVER_TEST_REPO,
         }
     }
 
@@ -189,9 +196,16 @@ impl TerrariumState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerrariumRelease {
     pub pack: PackKind,
+    /// З якого каналу (репозиторію) взято реліз.
+    #[serde(default)]
+    pub channel: Channel,
+    /// Репозиторій, у якому лежить реліз, — звідти й качаємо файл.
+    #[serde(default)]
+    pub repo: String,
     /// Ідентифікатор релізу на GitHub (потрібен для «поширити для всіх»).
     pub id: u64,
-    /// Тестовий реліз (pre-release) — його бачать лише адміни й тестери.
+    /// Тестовий реліз, якого ще нема у стабільному репозиторії — його можна
+    /// «поширити для всіх». Бачать лише адміни й тестери.
     pub prerelease: bool,
     pub html_url: String,
     pub tag: String,
@@ -208,10 +222,6 @@ pub struct TerrariumRelease {
 #[derive(Deserialize)]
 struct GithubRelease {
     id: u64,
-    #[serde(default)]
-    prerelease: bool,
-    #[serde(default)]
-    draft: bool,
     html_url: String,
     tag_name: String,
     name: Option<String>,
@@ -318,44 +328,39 @@ async fn github_get_json<T: serde::de::DeserializeOwned>(
     }
 }
 
-/// Запитує останній реліз збірки і знаходить у ньому `.mrpack`.
-/// `Stable` — останній звичайний реліз (`/releases/latest`, pre-release
-/// GitHub сюди не включає); `Test` — найновіший реліз узагалі, включно з
-/// тестовими.
-#[tracing::instrument]
-pub async fn fetch_latest_release(
+/// Останній звичайний реліз репозиторію (`/releases/latest`; чернетки й
+/// pre-release GitHub сюди не включає). `Ok(None)` — релізів ще немає.
+async fn fetch_repo_latest(
+    repo: &str,
+    token: Option<&str>,
+    context: &str,
+) -> crate::Result<Option<GithubRelease>> {
+    let url = format!("https://api.github.com/repos/{repo}/releases/latest");
+    match github_get_json::<GithubRelease>(&url, token, context).await {
+        Ok(release) => Ok(Some(release)),
+        Err(err) if err.to_string().contains("404") => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+/// Чи є в репозиторії реліз із таким тегом.
+async fn repo_has_tag(repo: &str, tag: &str, token: Option<&str>) -> bool {
+    let url = format!(
+        "https://api.github.com/repos/{repo}/releases/tags/{}",
+        urlencoding::encode(tag)
+    );
+    github_get_json::<serde_json::Value>(&url, token, "Перевірка тегу")
+        .await
+        .is_ok()
+}
+
+fn to_release(
     pack: PackKind,
     channel: Channel,
+    repo: &str,
+    release: GithubRelease,
+    prerelease: bool,
 ) -> crate::Result<TerrariumRelease> {
-    let repo = pack.repo();
-    let token = read_token(&get_state().await?);
-
-    let release: GithubRelease = match channel {
-        Channel::Stable => {
-            let url =
-                format!("https://api.github.com/repos/{repo}/releases/latest");
-            github_get_json(&url, token.as_deref(), "Перевірка оновлень")
-                .await?
-        }
-        Channel::Test => {
-            let url = format!(
-                "https://api.github.com/repos/{repo}/releases?per_page=30"
-            );
-            let releases: Vec<GithubRelease> = github_get_json(
-                &url,
-                token.as_deref(),
-                "Перевірка тестових версій",
-            )
-            .await?;
-            // GitHub віддає від найновішого; чернетки пропускаємо
-            releases.into_iter().find(|r| !r.draft).ok_or_else(|| {
-                crate::ErrorKind::OtherError(format!(
-                    "У репозиторії {repo} ще немає релізів"
-                ))
-            })?
-        }
-    };
-
     let asset = release
         .assets
         .into_iter()
@@ -369,8 +374,10 @@ pub async fn fetch_latest_release(
 
     Ok(TerrariumRelease {
         pack,
+        channel,
+        repo: repo.to_string(),
         id: release.id,
-        prerelease: release.prerelease,
+        prerelease,
         html_url: release.html_url,
         name: release.name.unwrap_or_else(|| release.tag_name.clone()),
         tag: release.tag_name,
@@ -381,6 +388,46 @@ pub async fn fetch_latest_release(
         mrpack_size: asset.size,
         mrpack_asset_id: asset.id,
     })
+}
+
+/// Запитує останній реліз збірки і знаходить у ньому `.mrpack`.
+/// `Stable` — стабільний репозиторій; `Test` — приватний тестовий. Якщо в
+/// тестовому ще нічого немає, віддаємо стабільний (з `prerelease: false`, щоб
+/// головна показала «тестових версій немає»).
+#[tracing::instrument]
+pub async fn fetch_latest_release(
+    pack: PackKind,
+    channel: Channel,
+) -> crate::Result<TerrariumRelease> {
+    let token = read_token(&get_state().await?);
+    let stable_repo = pack.repo(Channel::Stable);
+
+    if channel == Channel::Test {
+        let test_repo = pack.repo(Channel::Test);
+        if let Some(release) = fetch_repo_latest(
+            test_repo,
+            token.as_deref(),
+            "Перевірка тестових версій",
+        )
+        .await?
+        {
+            // Уже скопійований у стабільний — поширювати вдруге нема чого
+            let promoted =
+                repo_has_tag(stable_repo, &release.tag_name, token.as_deref())
+                    .await;
+            return to_release(pack, channel, test_repo, release, !promoted);
+        }
+    }
+
+    let release =
+        fetch_repo_latest(stable_repo, token.as_deref(), "Перевірка оновлень")
+            .await?
+            .ok_or_else(|| {
+                crate::ErrorKind::OtherError(format!(
+                    "У репозиторії {stable_repo} ще немає релізів"
+                ))
+            })?;
+    to_release(pack, Channel::Stable, stable_repo, release, false)
 }
 
 /// Завантажує `.mrpack` релізу в кеш лаунчера і повертає шлях до файлу.
@@ -404,9 +451,13 @@ pub async fn download_release(
     }
 
     let token = read_token(&get_state().await?);
+    let repo = if release.repo.is_empty() {
+        release.pack.repo(release.channel)
+    } else {
+        release.repo.as_str()
+    };
     let url = format!(
-        "https://api.github.com/repos/{}/releases/assets/{}",
-        release.pack.repo(),
+        "https://api.github.com/repos/{repo}/releases/assets/{}",
         release.mrpack_asset_id
     );
     let asset_request = |token: Option<&str>| {
@@ -446,6 +497,10 @@ pub struct AdminInfo {
     pub can_push_server: bool,
     /// Ключ читає приватний серверний репозиторій → достатньо для тестера.
     pub can_read_server: bool,
+    pub client_test_repo: String,
+    pub server_test_repo: String,
+    /// Ключ читає хоча б один приватний тестовий репозиторій → тестер.
+    pub can_read_test: bool,
     /// Роль за цим ключем; `None` — ключ дійсний, але доступу до збірок не дає.
     pub role: Option<AccessRole>,
 }
@@ -628,9 +683,13 @@ pub async fn verify_admin_token(token: String) -> crate::Result<AdminInfo> {
     let can_push_server = can_push(&token, SERVER_REPO).await;
     let can_read_server =
         can_push_server || can_read(&token, SERVER_REPO).await;
+    // Тестер — той, кому дали читати приватний тестовий репозиторій
+    // (клієнта чи сервера); читання серверного — теж достатньо, як і раніше.
+    let can_read_test = can_read(&token, CLIENT_TEST_REPO).await
+        || can_read(&token, SERVER_TEST_REPO).await;
     let role = if can_push_client || can_push_server {
         Some(AccessRole::Admin)
-    } else if can_read_server {
+    } else if can_read_test || can_read_server {
         Some(AccessRole::Tester)
     } else {
         None
@@ -643,11 +702,15 @@ pub async fn verify_admin_token(token: String) -> crate::Result<AdminInfo> {
         server_repo: SERVER_REPO.to_string(),
         can_push_server,
         can_read_server,
+        client_test_repo: CLIENT_TEST_REPO.to_string(),
+        server_test_repo: SERVER_TEST_REPO.to_string(),
+        can_read_test,
         role,
     })
 }
 
-/// «Поширити для всіх»: зняти з тестового релізу позначку pre-release —
+/// «Поширити для всіх»: скопіювати реліз із приватного тестового
+/// репозиторію у стабільний (той самий тег, назва, опис і `.mrpack`) —
 /// він стає `latest`, і звичайні гравці отримують оновлення.
 #[tracing::instrument]
 pub async fn promote_release(
@@ -660,21 +723,84 @@ pub async fn promote_release(
             "Адмін-ключ не задано — додай його в налаштуваннях".to_string(),
         )
     })?;
-    let repo = pack.repo();
-    let _: serde_json::Value = github_json(
+    let test_repo = pack.repo(Channel::Test);
+    let stable_repo = pack.repo(Channel::Stable);
+
+    let source: GithubRelease = github_json(
         REQWEST_CLIENT
-            .patch(format!(
-                "https://api.github.com/repos/{repo}/releases/{release_id}"
+            .get(format!(
+                "https://api.github.com/repos/{test_repo}/releases/{release_id}"
+            ))
+            .bearer_auth(&token),
+        "Тестовий реліз",
+    )
+    .await?;
+    if repo_has_tag(stable_repo, &source.tag_name, Some(&token)).await {
+        return Err(crate::ErrorKind::OtherError(format!(
+            "Версія {} уже поширена — у {stable_repo} є такий реліз",
+            source.tag_name
+        ))
+        .into());
+    }
+    let source_release =
+        to_release(pack, Channel::Test, test_repo, source, true)?;
+    // Файл беремо з кешу (або качаємо) — той самий, що ставив тестер
+    let path = download_release(source_release.clone()).await?;
+    let bytes = io::read(&path).await?;
+
+    let created: GithubCreatedRelease = github_json(
+        REQWEST_CLIENT
+            .post(format!(
+                "https://api.github.com/repos/{stable_repo}/releases"
             ))
             .bearer_auth(&token)
             .json(&serde_json::json!({
+                "tag_name": source_release.tag,
+                "name": source_release.name,
+                "body": source_release.body.clone().unwrap_or_default(),
                 "prerelease": false,
                 "make_latest": "true",
             })),
-        "Поширення релізу",
+        "Створення релізу",
     )
     .await?;
+    upload_release_asset(
+        stable_repo,
+        created.id,
+        &source_release.mrpack_name,
+        bytes,
+        &token,
+    )
+    .await?;
+
     fetch_latest_release(pack, Channel::Stable).await
+}
+
+/// Завантажує файл як asset релізу.
+async fn upload_release_asset(
+    repo: &str,
+    release_id: u64,
+    asset_name: &str,
+    bytes: Vec<u8>,
+    token: &str,
+) -> crate::Result<()> {
+    let response = REQWEST_CLIENT
+        .post(format!(
+            "https://uploads.github.com/repos/{repo}/releases/{release_id}/assets?name={}",
+            urlencoding::encode(asset_name)
+        ))
+        .bearer_auth(token)
+        .header("Accept", "application/vnd.github+json")
+        .header("Content-Type", "application/octet-stream")
+        .body(bytes)
+        .send()
+        .await?;
+    let status = response.status();
+    if !status.is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err(github_error("Завантаження .mrpack", status, &text));
+    }
+    Ok(())
 }
 
 /// Експортує інстанс у `.mrpack` і публікує його як новий реліз GitHub.
@@ -690,7 +816,12 @@ pub async fn publish_release(
             "Адмін-ключ не задано — додай його в налаштуваннях".to_string(),
         )
     })?;
-    let repo = request.pack.repo();
+    let channel = if request.prerelease {
+        Channel::Test
+    } else {
+        Channel::Stable
+    };
+    let repo = request.pack.repo(channel);
     let tag = request.tag.trim().to_string();
     if tag.is_empty() {
         return Err(crate::ErrorKind::OtherError(
@@ -767,7 +898,9 @@ pub async fn publish_release(
     }
     exported?;
 
-    // 2. Реліз. GitHub сам створить тег на гілці за замовчуванням, якщо його ще нема.
+    // 2. Реліз (у тестовому репозиторії — теж звичайний, не pre-release: так
+    //    `/releases/latest` його бачить). GitHub сам створить тег на гілці за
+    //    замовчуванням, якщо його ще нема.
     let created: GithubCreatedRelease = github_json(
         REQWEST_CLIENT
             .post(format!("https://api.github.com/repos/{repo}/releases"))
@@ -776,7 +909,8 @@ pub async fn publish_release(
                 "tag_name": tag,
                 "name": request.name,
                 "body": request.body.clone().unwrap_or_default(),
-                "prerelease": request.prerelease,
+                "prerelease": false,
+                "make_latest": "true",
             })),
         "Створення релізу",
     )
@@ -784,23 +918,7 @@ pub async fn publish_release(
 
     // 3. Файл збірки як asset релізу.
     let bytes = io::read(&path).await?;
-    let response = REQWEST_CLIENT
-        .post(format!(
-            "https://uploads.github.com/repos/{repo}/releases/{}/assets?name={}",
-            created.id,
-            urlencoding::encode(&asset_name)
-        ))
-        .bearer_auth(&token)
-        .header("Accept", "application/vnd.github+json")
-        .header("Content-Type", "application/octet-stream")
-        .body(bytes)
-        .send()
-        .await?;
-    let status = response.status();
-    if !status.is_success() {
-        let text = response.text().await.unwrap_or_default();
-        return Err(github_error("Завантаження .mrpack", status, &text));
-    }
+    upload_release_asset(repo, created.id, &asset_name, bytes, &token).await?;
 
     // Примірник тепер = опублікована версія. Записуємо це в його прив'язку
     // (imported_modpack), бо саме звідти лаунчер бере «встановлену» версію
@@ -843,11 +961,6 @@ pub async fn publish_release(
         .iter()
         .map(|p| commands::flat_path(p))
         .collect();
-    let channel = if request.prerelease {
-        Channel::Test
-    } else {
-        Channel::Stable
-    };
     let pack_state = terrarium.pack_for_mut(request.pack, channel);
     pack_state.instance_id = Some(request.instance_id);
     pack_state.installed_tag = Some(tag.clone());
@@ -885,8 +998,22 @@ pub async fn publish_preview(
     let mut release_name = None;
     let mut release_files = HashMap::<String, Option<String>>::new();
     let mut release_prerelease = false;
-    // База порівняння — найновіший реліз, включно з тестовим
-    if let Ok(release) = fetch_latest_release(pack, Channel::Test).await {
+    // База порівняння — найновіший реліз з обох каналів (тестовий, якщо він
+    // свіжіший за стабільний і ще не поширений)
+    let stable = fetch_latest_release(pack, Channel::Stable).await.ok();
+    let test = fetch_latest_release(pack, Channel::Test)
+        .await
+        .ok()
+        .filter(|r| r.channel == Channel::Test);
+    let newest = match (stable, test) {
+        (Some(s), Some(t)) => Some(if t.published_at >= s.published_at {
+            t
+        } else {
+            s
+        }),
+        (s, t) => s.or(t),
+    };
+    if let Some(release) = newest {
         release_prerelease = release.prerelease;
         let path = download_release(release.clone()).await?;
         release_tag = Some(release.tag);

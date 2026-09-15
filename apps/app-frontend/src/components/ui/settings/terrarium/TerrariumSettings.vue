@@ -33,6 +33,12 @@ const messages = defineMessages({
 		defaultMessage:
 			'Ти бачиш тестові версії збірки (канал «Тест» на головній) і можеш їх ставити окремим примірником.',
 	},
+	testRepos: { id: 'terrarium.settings.test-repos', defaultMessage: 'Тестові версії' },
+	testReposHint: {
+		id: 'terrarium.settings.test-repos-hint',
+		defaultMessage:
+			'Приватні репозиторії — бету бачать лише ті, кому дано доступ. Щоб зробити когось тестером: додай його як collaborator (Read) у тестовий репозиторій, він створює ключ GitHub з правом читання Contents і вставляє його тут.',
+	},
 	keyPlaceholder: {
 		id: 'terrarium.settings.key-placeholder',
 		defaultMessage: 'github_pat_… або ghp_…',
@@ -151,16 +157,29 @@ onMounted(load)
 					<li>
 						{{ formatMessage(messages.clientPack) }} · <code>{{ info.client_repo }}</code> ·
 						<span :class="info.can_push_client ? 'text-brand' : 'text-orange'">
-							{{ info.can_push_client ? formatMessage(messages.repoOk) : formatMessage(messages.repoNo) }}
+							{{
+								info.can_push_client
+									? formatMessage(messages.repoOk)
+									: formatMessage(messages.repoNo)
+							}}
 						</span>
 					</li>
 					<li>
 						{{ formatMessage(messages.serverPack) }} · <code>{{ info.server_repo }}</code> ·
 						<span :class="info.can_push_server ? 'text-brand' : 'text-orange'">
-							{{ info.can_push_server ? formatMessage(messages.repoOk) : formatMessage(messages.repoNo) }}
+							{{
+								info.can_push_server
+									? formatMessage(messages.repoOk)
+									: formatMessage(messages.repoNo)
+							}}
 						</span>
 					</li>
+					<li>
+						{{ formatMessage(messages.testRepos) }} · <code>{{ info.client_test_repo }}</code> ·
+						<code>{{ info.server_test_repo }}</code>
+					</li>
 				</ul>
+				<p class="m-0 mt-2 text-sm text-secondary">{{ formatMessage(messages.testReposHint) }}</p>
 			</template>
 			<template v-else-if="info && info.role === 'tester'">
 				<p class="m-0 flex items-center gap-2 font-medium text-contrast">
