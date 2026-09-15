@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::State;
 use crate::state::instances::commands;
 pub use crate::state::instances::commands::ContentGroup;
+use crate::state::{EditInstance, InstanceLink};
 use crate::util::fetch::REQWEST_CLIENT;
 use crate::util::io;
 
@@ -177,7 +178,8 @@ impl TerrariumState {
         if self.client.instance_id.is_none() && self.instance_id.is_some() {
             self.client.instance_id = self.instance_id.take();
             self.client.installed_tag = self.installed_tag.take();
-            self.client.excluded_paths = std::mem::take(&mut self.excluded_paths);
+            self.client.excluded_paths =
+                std::mem::take(&mut self.excluded_paths);
         }
         self
     }
@@ -346,14 +348,11 @@ pub async fn fetch_latest_release(
             )
             .await?;
             // GitHub віддає від найновішого; чернетки пропускаємо
-            releases
-                .into_iter()
-                .find(|r| !r.draft)
-                .ok_or_else(|| {
-                    crate::ErrorKind::OtherError(format!(
-                        "У репозиторії {repo} ще немає релізів"
-                    ))
-                })?
+            releases.into_iter().find(|r| !r.draft).ok_or_else(|| {
+                crate::ErrorKind::OtherError(format!(
+                    "У репозиторії {repo} ще немає релізів"
+                ))
+            })?
         }
     };
 
@@ -585,7 +584,9 @@ async fn can_push(token: &str, repo: &str) -> bool {
     }
     let latest: Option<GithubRelease> = github_json(
         REQWEST_CLIENT
-            .get(format!("https://api.github.com/repos/{repo}/releases/latest"))
+            .get(format!(
+                "https://api.github.com/repos/{repo}/releases/latest"
+            ))
             .bearer_auth(token),
         "Останній реліз",
     )
@@ -625,7 +626,8 @@ pub async fn verify_admin_token(token: String) -> crate::Result<AdminInfo> {
 
     let can_push_client = can_push(&token, CLIENT_REPO).await;
     let can_push_server = can_push(&token, SERVER_REPO).await;
-    let can_read_server = can_push_server || can_read(&token, SERVER_REPO).await;
+    let can_read_server =
+        can_push_server || can_read(&token, SERVER_REPO).await;
     let role = if can_push_client || can_push_server {
         Some(AccessRole::Admin)
     } else if can_read_server {
@@ -703,7 +705,8 @@ pub async fn publish_release(
     .is_some()
     {
         return Err(crate::ErrorKind::OtherError(
-            "Закрий гру (або дочекайся оновлення) перед публікацією".to_string(),
+            "Закрий гру (або дочекайся оновлення) перед публікацією"
+                .to_string(),
         )
         .into());
     }
@@ -740,10 +743,8 @@ pub async fn publish_release(
         }
     }
 
-    let asset_name = format!(
-        "terrarium-{}-{tag}.mrpack",
-        request.pack.cache_folder()
-    );
+    let asset_name =
+        format!("terrarium-{}-{tag}.mrpack", request.pack.cache_folder());
     let dir = state
         .directories
         .caches_dir()
@@ -801,6 +802,39 @@ pub async fn publish_release(
         return Err(github_error("Завантаження .mrpack", status, &text));
     }
 
+    // Примірник тепер = опублікована версія. Записуємо це в його прив'язку
+    // (imported_modpack), бо саме звідти лаунчер бере «встановлену» версію
+    // для картки «Надається» і для порівняння з останнім релізом.
+    if let Some(metadata) =
+        crate::api::instance::get(&request.instance_id).await?
+    {
+        let (name, project_id, version_id) = match metadata.link {
+            InstanceLink::ImportedModpack {
+                name,
+                project_id,
+                version_id,
+                ..
+            } => (name, project_id, version_id),
+            _ => (None, None, None),
+        };
+        crate::api::instance::edit(
+            &request.instance_id,
+            EditInstance {
+                link: Some(InstanceLink::ImportedModpack {
+                    project_id,
+                    version_id,
+                    name: name.or_else(|| Some(request.name.clone())),
+                    version_number: Some(
+                        tag.trim_start_matches('v').to_string(),
+                    ),
+                    filename: Some(asset_name.clone()),
+                }),
+                ..EditInstance::default()
+            },
+        )
+        .await?;
+    }
+
     // Адмін щойно опублікував саме те, що в нього встановлено; виключення
     // запам'ятовуємо, щоб наступного разу не пропонувати особисті моди знову.
     // Виключення спільні для каналів; примірник/тег — у каналі, куди публікували.
@@ -837,8 +871,12 @@ pub async fn publish_preview(
     instance_id: String,
 ) -> crate::Result<PublishPreview> {
     let terrarium = get_state().await?;
-    let excluded: HashSet<String> =
-        terrarium.pack(pack).excluded_paths.iter().cloned().collect();
+    let excluded: HashSet<String> = terrarium
+        .pack(pack)
+        .excluded_paths
+        .iter()
+        .cloned()
+        .collect();
 
     // Файли останнього релізу: посилання з modrinth.index.json (без вмісту)
     // та overrides (з sha1 вмісту — щоб бачити змінені конфіги).
@@ -860,13 +898,14 @@ pub async fn publish_preview(
         release_name = contents.name;
     }
 
-    let metadata = crate::api::instance::get(&instance_id)
-        .await?
-        .ok_or_else(|| {
-            crate::ErrorKind::OtherError(format!(
-                "Примірник {instance_id} не знайдено"
-            ))
-        })?;
+    let metadata =
+        crate::api::instance::get(&instance_id)
+            .await?
+            .ok_or_else(|| {
+                crate::ErrorKind::OtherError(format!(
+                    "Примірник {instance_id} не знайдено"
+                ))
+            })?;
     let core = PackCore {
         game_version: metadata.applied_content_set.game_version.clone(),
         loader: metadata.applied_content_set.loader.as_str().to_string(),
@@ -908,7 +947,9 @@ pub async fn publish_preview(
                     .await?;
                 queue.extend(children);
             }
-            crate::instance::PackExportCandidateType::File => entries.push(entry),
+            crate::instance::PackExportCandidateType::File => {
+                entries.push(entry)
+            }
         }
     }
 
@@ -957,11 +998,14 @@ pub async fn publish_preview(
             group,
         });
     }
-    candidates.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    candidates
+        .sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
 
     let mut removed_from_instance: Vec<String> = release_files
         .into_keys()
-        .filter(|p| !seen.contains(p) && !p.starts_with(&format!("{BRANDING_DIR}/")))
+        .filter(|p| {
+            !seen.contains(p) && !p.starts_with(&format!("{BRANDING_DIR}/"))
+        })
         .collect();
     removed_from_instance.sort();
 
@@ -994,8 +1038,7 @@ fn sha1_of(path: &Path) -> std::io::Result<String> {
 }
 
 fn zip_error(error: zip::result::ZipError) -> crate::Error {
-    crate::ErrorKind::OtherError(format!("Пошкоджений .mrpack: {error}"))
-        .into()
+    crate::ErrorKind::OtherError(format!("Пошкоджений .mrpack: {error}")).into()
 }
 
 struct ReleaseContents {
@@ -1032,8 +1075,7 @@ fn read_release_files(path: &Path) -> crate::Result<ReleaseContents> {
         if name.ends_with('/') {
             continue;
         }
-        for prefix in ["overrides/", "client-overrides/", "server-overrides/"]
-        {
+        for prefix in ["overrides/", "client-overrides/", "server-overrides/"] {
             if let Some(rest) = name.strip_prefix(prefix) {
                 let mut hasher = sha1_smol::Sha1::new();
                 let mut buf = [0u8; 1 << 16];
@@ -1044,7 +1086,10 @@ fn read_release_files(path: &Path) -> crate::Result<ReleaseContents> {
                     }
                     hasher.update(&buf[..n]);
                 }
-                files.insert(rest.to_string(), Some(hasher.digest().to_string()));
+                files.insert(
+                    rest.to_string(),
+                    Some(hasher.digest().to_string()),
+                );
                 break;
             }
         }
@@ -1083,7 +1128,8 @@ fn read_release_files(path: &Path) -> crate::Result<ReleaseContents> {
 #[tracing::instrument]
 pub async fn apply_pack_branding(instance_id: String) -> crate::Result<bool> {
     let state = State::get().await?;
-    let instance_dir = crate::api::instance::get_full_path(&instance_id).await?;
+    let instance_dir =
+        crate::api::instance::get_full_path(&instance_id).await?;
 
     // Групи модів: спершу повертаємо особисті моди туди, де вони були до
     // оновлення (див. prepare_pack_update), потім розкладаємо моди збірки
@@ -1185,8 +1231,13 @@ pub async fn set_mod_group(
     let mut result = Vec::with_capacity(paths.len());
     for path in &paths {
         result.push(
-            commands::set_mod_group(&instance_id, path, group.as_deref(), &state)
-                .await?,
+            commands::set_mod_group(
+                &instance_id,
+                path,
+                group.as_deref(),
+                &state,
+            )
+            .await?,
         );
     }
     crate::state::sync_content_files(&instance_id, &state).await?;

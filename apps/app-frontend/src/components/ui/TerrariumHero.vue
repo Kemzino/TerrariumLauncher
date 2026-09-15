@@ -191,14 +191,23 @@ const instance = computed(() =>
 		: undefined,
 )
 const installed = computed(() => !!instance.value)
+/**
+ * Яка версія збірки реально стоїть у примірнику. Джерело правди — сам примірник
+ * (версія з .mrpack, яку записав інсталятор); тег у terrarium.json — запасний
+ * варіант, бо він міг розійтися з дійсністю (прив'язка чужого примірника тощо).
+ */
+const installedTag = computed<string | null>(() => {
+	const link = instance.value?.link
+	if (link?.type === 'imported_modpack' && link.version_number) {
+		return link.version_number.startsWith('v') ? link.version_number : `v${link.version_number}`
+	}
+	return packState.value.installed_tag
+})
 const publishModal = ref<InstanceType<typeof TerrariumPublishModal> | null>(null)
 // Адмін може прив'язати вже наявний примірник як «збірку Terrarium», а не качати її знову
 const linkableInstances = computed(() => instancesQuery.data.value ?? [])
 const updateAvailable = computed(
-	() =>
-		installed.value &&
-		release.value !== null &&
-		release.value.tag !== packState.value.installed_tag,
+	() => installed.value && release.value !== null && release.value.tag !== installedTag.value,
 )
 
 async function refreshRelease() {
@@ -416,11 +425,15 @@ async function stop() {
 
 async function linkExisting(instanceId: string) {
 	if (busy.value) return
+	// Тег — лише з самого примірника (версія .mrpack); невідомо → null, і hero
+	// запропонує оновлення замість «у тебе остання версія»
+	const link = (instancesQuery.data.value ?? []).find((i) => i.id === instanceId)?.link
+	const version = link?.type === 'imported_modpack' ? link.version_number : null
 	await patchPack(
 		activePack.value,
 		{
 			instance_id: instanceId,
-			installed_tag: release.value?.tag ?? null,
+			installed_tag: version ? (version.startsWith('v') ? version : `v${version}`) : null,
 		},
 		activeChannel.value,
 	).catch(handleError)
@@ -445,7 +458,7 @@ function openPublish() {
 	publishModal.value?.show(
 		activePack.value,
 		instance.value.id,
-		packState.value.installed_tag,
+		installedTag.value,
 		getInstanceIconUrl(instance.value.icon_path),
 	)
 }
@@ -593,18 +606,16 @@ onMounted(async () => {
 						<UpdatedIcon class="text-brand" />
 						{{ formatMessage(messages.latestVersion, { tag: release!.tag }) }}
 						<span class="terrarium-hero__muted">
-							· {{ formatMessage(messages.installedVersion, { tag: packState.installed_tag }) }}
+							· {{ formatMessage(messages.installedVersion, { tag: installedTag ?? '—' }) }}
 						</span>
 					</template>
 					<template v-else-if="!release">
 						<PackageOpenIcon class="text-orange" />
-						{{ formatMessage(messages.unknownLatest, { tag: packState.installed_tag ?? '—' }) }}
+						{{ formatMessage(messages.unknownLatest, { tag: installedTag ?? '—' }) }}
 					</template>
 					<template v-else>
 						<UpdatedIcon class="text-brand" /> {{ formatMessage(messages.upToDate) }}
-						<span v-if="packState.installed_tag" class="terrarium-hero__muted">
-							· {{ packState.installed_tag }}
-						</span>
+						<span v-if="installedTag" class="terrarium-hero__muted"> · {{ installedTag }} </span>
 					</template>
 				</p>
 				<div v-if="installProgress" class="terrarium-hero__bar" aria-hidden="true">

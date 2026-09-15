@@ -24,11 +24,8 @@ const state = ref<TerrariumState>({
 	client_test: emptyPack(),
 	server_test: emptyPack(),
 })
-let loaded = false
-
 async function reload() {
 	state.value = await terrarium_get_state()
-	loaded = true
 }
 
 async function save(next: TerrariumState) {
@@ -36,13 +33,16 @@ async function save(next: TerrariumState) {
 	state.value = next
 }
 
+// Перед кожним частковим записом перечитуємо файл: стан могли змінити ззовні
+// (Rust після публікації, інший запущений лаунчер), і зберігати поверх нього
+// копію з пам'яті — значить повернути, скажімо, щойно видалений адмін-ключ.
 async function patch(changes: Partial<TerrariumState>) {
-	if (!loaded) await reload()
+	await reload()
 	await save({ ...state.value, ...changes })
 }
 
 async function patchPack(kind: PackKind, changes: Partial<PackState>, channel: Channel = 'stable') {
-	if (!loaded) await reload()
+	await reload()
 	const key = packStateKey(kind, channel)
 	await save({ ...state.value, [key]: { ...state.value[key], ...changes } })
 }
