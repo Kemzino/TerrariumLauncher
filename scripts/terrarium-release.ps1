@@ -4,6 +4,7 @@
 
 .DESCRIPTION
   1. Збирає фронтенд (окремо, бо вкладений turbo з-під `tauri build` падає на Windows).
+     Це запасний ручний шлях — основний реліз робить GitHub Actions (terrarium-release.yml).
   2. `tauri build` з tauri-release.conf.json: фіча `updater`, підпис .sig нашим ключем.
   3. Генерує latest.json (формат Tauri updater) і створює реліз через `gh`.
 
@@ -64,8 +65,14 @@ if (-not (git branch -r --contains $head)) {
 
 # --- збірка -----------------------------------------------------------------
 if (-not $SkipBuild) {
+	# Ті самі кроки, що turbo робить для @modrinth/app-frontend#build, але явно —
+	# turbo на Windows часом зависає без дочірніх процесів
 	Write-Host '==> Збірка фронтенду' -ForegroundColor Cyan
-	pnpm turbo run build --filter=@modrinth/app-frontend
+	pnpm -w i18n:coverage
+	if ($LASTEXITCODE -ne 0) { throw 'i18n:coverage впав' }
+	pnpm --filter @modrinth/api-client build
+	if ($LASTEXITCODE -ne 0) { throw 'Збірка api-client впала' }
+	pnpm --filter @modrinth/app-frontend build
 	if ($LASTEXITCODE -ne 0) { throw 'Збірка фронтенду впала' }
 
 	Write-Host '==> tauri build (updater + підпис)' -ForegroundColor Cyan

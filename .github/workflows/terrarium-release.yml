@@ -1,0 +1,211 @@
+name: Terrarium Launcher release
+
+# Два способи запустити реліз:
+#  1. Actions → "Terrarium Launcher release" → Run workflow → ввести версію X.Y.Z.
+#     Воркфлоу сам підніме версію у файлах, закомітить у вибрану гілку, поставить тег і збере.
+#  2. Запушити тег vX.Y.Z вручну (версія у файлах уже має збігатися з тегом).
+#
+# Потрібен секрет TAURI_SIGNING_PRIVATE_KEY — вміст ~/.tauri/terrarium-launcher.key
+# (і TAURI_SIGNING_PRIVATE_KEY_PASSWORD, якщо ключ із паролем). Див. docs-terrarium/RELEASE.md.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версія релізу (X.Y.Z), без префікса v'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: terrarium-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Підняти версію і поставити тег
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version, commit and tag
+        id: bump
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Версія має бути у форматі X.Y.Z, отримано '$VERSION'"
+            exit 1
+          fi
+          TAG="v$VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Тег $TAG уже існує"
+            exit 1
+          fi
+
+          # Версія живе у трьох місцях (tauri.conf.json читає її з package.json)
+          sed -i -E "0,/\"version\": \"[^\"]+\"/s//\"version\": \"$VERSION\"/" apps/app-frontend/package.json
+          sed -i -E "0,/^version = \"[^\"]+\"/s//version = \"$VERSION\"/" apps/app/Cargo.toml
+          sed -i -E "0,/^version = \"[^\"]+\"/s//version = \"$VERSION\"/" packages/app-lib/Cargo.toml
+          perl -0pi -e "s/(name = \"theseus_gui\"\nversion = \")[^\"]+/\${1}$VERSION/; s/(name = \"theseus\"\nversion = \")[^\"]+/\${1}$VERSION/" Cargo.lock
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/app-frontend/package.json apps/app/Cargo.toml packages/app-lib/Cargo.toml Cargo.lock
+          git commit -m "chore: release $TAG"
+          git tag -a "$TAG" -m "Terrarium Launcher $VERSION"
+          git push origin HEAD "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Зібрати й опублікувати (Windows x64)
+    needs: [tag]
+    # needs.tag пропускається при пуші тега — тоді збираємо одразу
+    if: always() && (github.event_name == 'push' || needs.tag.result == 'success')
+    runs-on: windows-latest
+    env:
+      TAG: ${{ needs.tag.outputs.tag || github.ref_name }}
+      SQLX_OFFLINE: 'true'
+    steps:
+      - name: Check out tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+
+      - name: Verify version matches tag and signing key is configured
+        shell: bash
+        env:
+          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          PKG_VERSION=$(jq -r .version apps/app-frontend/package.json)
+          if [ "$PKG_VERSION" != "$VERSION" ]; then
+            echo "::error::Тег $TAG, а в apps/app-frontend/package.json версія $PKG_VERSION"
+            exit 1
+          fi
+          if [ "$HAS_KEY" != "true" ]; then
+            echo "::error::Секрет TAURI_SIGNING_PRIVATE_KEY не заданий — без нього оновлення не підписати"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Setup Rust (rust-toolchain.toml)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ''
+          cache-key: terrarium-release
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Setup pnpm
+        run: corepack enable
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare app-lib .env
+        shell: bash
+        run: cp packages/app-lib/.env.prod packages/app-lib/.env
+
+      # Ті самі кроки, що робить turbo для @modrinth/app-frontend#build, але явно
+      - name: Build frontend
+        run: |
+          pnpm -w i18n:coverage
+          pnpm --filter @modrinth/api-client build
+          pnpm --filter @modrinth/app-frontend build
+
+      - name: Build installer (updater + minisign)
+        working-directory: apps/app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm exec tauri build --ci --config tauri-release.conf.json --config tauri.local-release.conf.json --bundles nsis
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE="target/release/bundle/nsis"
+          SETUP=$(ls "$BUNDLE"/*_"${VERSION}"_x64-setup.exe)
+          test -f "$SETUP.sig" || { echo "::error::Немає $SETUP.sig — збірка без ключа підпису?"; exit 1; }
+          mkdir -p dist-release
+          # Імена без пробілів: GitHub перейменовує асети, а URL у latest.json має бути передбачуваним
+          ASSET="Terrarium-Launcher_${VERSION}_x64-setup.exe"
+          cp "$SETUP" "dist-release/$ASSET"
+          cp "$SETUP.sig" "dist-release/$ASSET.sig"
+          echo "ASSET=$ASSET" >> "$GITHUB_ENV"
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREV=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          {
+            echo "## Terrarium Launcher ${VERSION}"
+            echo
+            if [ -n "$PREV" ]; then
+              echo "Зміни з ${PREV}:"
+              echo
+              git log --no-merges --pretty='- %s' "${PREV}..${TAG}" | grep -v '^- chore: release ' || true
+            else
+              echo "Перший реліз."
+            fi
+            echo
+            echo "> Інсталятор без сертифіката Authenticode — SmartScreen може попередити при першому запуску: «Докладніше» → «Виконати в будь-якому разі». Встановлені лаунчери оновлюються автоматично."
+          } > dist-release/release-notes.md
+          cat dist-release/release-notes.md
+
+      - name: Generate latest.json (Tauri updater manifest)
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg version "$VERSION" \
+            --rawfile notes dist-release/release-notes.md \
+            --rawfile sig "dist-release/$ASSET.sig" \
+            --arg url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ASSET}" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: (now | todateiso8601),
+              platforms: { "windows-x86_64": { signature: ($sig | rtrimstr("\n")), url: $url } }
+            }' > dist-release/latest.json
+          cat dist-release/latest.json
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" \
+            --verify-tag \
+            --title "Terrarium Launcher ${VERSION}" \
+            --notes-file dist-release/release-notes.md \
+            "dist-release/$ASSET" \
+            "dist-release/$ASSET.sig" \
+            dist-release/latest.json
+          echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
