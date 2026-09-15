@@ -4,6 +4,7 @@ name: Terrarium Launcher release
 #  1. Actions → "Terrarium Launcher release" → Run workflow → ввести версію X.Y.Z.
 #     Воркфлоу сам підніме версію у файлах, закомітить у вибрану гілку, поставить тег і збере.
 #  2. Запушити тег vX.Y.Z вручну (версія у файлах уже має збігатися з тегом).
+#  3. Run workflow з полем tag = існуючий тег — лише перезібрати/дозбирати реліз (без бампа).
 #
 # Потрібен секрет TAURI_SIGNING_PRIVATE_KEY — вміст ~/.tauri/terrarium-launcher.key
 # (і TAURI_SIGNING_PRIVATE_KEY_PASSWORD, якщо ключ із паролем). Див. docs-terrarium/RELEASE.md.
@@ -15,8 +16,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Версія релізу (X.Y.Z), без префікса v'
-        required: true
+        description: 'Нова версія (X.Y.Z, без v) — підніме версію, закомітить і поставить тег'
+        required: false
+        type: string
+      tag:
+        description: 'АБО існуючий тег (vX.Y.Z) — лише зібрати й опублікувати'
+        required: false
         type: string
 
 permissions:
@@ -29,7 +34,7 @@ concurrency:
 jobs:
   tag:
     name: Підняти версію і поставити тег
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.tag == ''
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.bump.outputs.tag }}
@@ -45,6 +50,10 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          if [ -z "$VERSION" ]; then
+            echo "::error::Вкажи або version (нова версія), або tag (існуючий тег)"
+            exit 1
+          fi
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Версія має бути у форматі X.Y.Z, отримано '$VERSION'"
             exit 1
@@ -72,11 +81,11 @@ jobs:
   build:
     name: Зібрати й опублікувати (Windows x64)
     needs: [tag]
-    # needs.tag пропускається при пуші тега — тоді збираємо одразу
-    if: always() && (github.event_name == 'push' || needs.tag.result == 'success')
+    # needs.tag пропускається при пуші тега або при inputs.tag — тоді збираємо одразу
+    if: always() && (github.event_name == 'push' || inputs.tag != '' || needs.tag.result == 'success')
     runs-on: windows-latest
     env:
-      TAG: ${{ needs.tag.outputs.tag || github.ref_name }}
+      TAG: ${{ needs.tag.outputs.tag || inputs.tag || github.ref_name }}
       SQLX_OFFLINE: 'true'
     steps:
       - name: Check out tag
@@ -138,12 +147,31 @@ jobs:
           pnpm --filter @modrinth/api-client build
           pnpm --filter @modrinth/app-frontend build
 
+      # NSIS і nsis_tauri_utils tauri качає з GitHub Releases у %LOCALAPPDATA%/tauri — кешуємо,
+      # бо ці завантаження періодично падають з 5xx
+      - name: Cache Tauri bundler tools
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/tauri
+          key: tauri-tools-${{ runner.os }}-nsis3
+
       - name: Build installer (updater + minisign)
+        shell: bash
         working-directory: apps/app
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: pnpm exec tauri build --ci --config tauri-release.conf.json --config tauri.local-release.conf.json --bundles nsis
+        run: |
+          # Повтор на випадок тимчасових помилок завантаження інструментів бандлера;
+          # cargo уже зібрано, тож повтор коштує секунди
+          for attempt in 1 2 3; do
+            if pnpm exec tauri build --ci --config tauri-release.conf.json --config tauri.local-release.conf.json --bundles nsis; then
+              exit 0
+            fi
+            echo "::warning::tauri build впав (спроба $attempt/3), повтор за 30 с"
+            sleep 30
+          done
+          exit 1
 
       - name: Collect release assets
         shell: bash
