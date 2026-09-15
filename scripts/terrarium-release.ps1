@@ -55,6 +55,13 @@ if ($releaseExists) {
 	throw "Реліз $tag уже існує на GitHub. Підніми версію в apps/app-frontend/package.json"
 }
 
+# Тег ставиться на HEAD — GitHub відхилить реліз, якщо коміта немає на remote
+$head = git rev-parse HEAD
+git fetch origin --quiet
+if (-not (git branch -r --contains $head)) {
+	throw "Коміт $head не запушений на origin. Спочатку: git push origin HEAD"
+}
+
 # --- збірка -----------------------------------------------------------------
 if (-not $SkipBuild) {
 	Write-Host '==> Збірка фронтенду' -ForegroundColor Cyan
@@ -85,7 +92,7 @@ Copy-Item $sig (Join-Path $outDir "$assetName.sig") -Force
 
 # --- release notes ----------------------------------------------------------
 if (-not $Notes) {
-	if ($NotesFile) { $Notes = Get-Content $NotesFile -Raw }
+	if ($NotesFile) { $Notes = Get-Content $NotesFile -Raw -Encoding UTF8 }
 	else { $Notes = "Terrarium Launcher $version" }
 }
 $notesPath = Join-Path $outDir 'release-notes.md'
@@ -110,7 +117,7 @@ Get-Content $latestPath
 
 # --- реліз на GitHub --------------------------------------------------------
 Write-Host "==> gh release create $tag" -ForegroundColor Cyan
-$ghArgs = @('release', 'create', $tag, '-R', $Repo, '--title', "Terrarium Launcher $version", '--notes-file', $notesPath, '--target', (git rev-parse HEAD))
+$ghArgs = @('release', 'create', $tag, '-R', $Repo, '--title', "Terrarium Launcher $version", '--notes-file', $notesPath, '--target', $head)
 if ($Draft) { $ghArgs += '--draft' }
 $ghArgs += @((Join-Path $outDir $assetName), (Join-Path $outDir "$assetName.sig"), $latestPath)
 gh @ghArgs

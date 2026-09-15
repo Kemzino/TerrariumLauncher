@@ -22,7 +22,7 @@
 
 1. Підняти `version` в `apps/app-frontend/package.json` (звідти її бере `tauri.conf.json`)
    і в `apps/app/Cargo.toml`. Оновлювач порівнює semver — без бампа нову версію ніхто не побачить.
-2. Закомітити.
+2. Закомітити і запушити (`git push origin HEAD`) — тег ставиться на HEAD, GitHub вимагає, щоб коміт був на remote.
 3. ```powershell
    $env:TAURI_SIGNING_PRIVATE_KEY = "$env:USERPROFILE\.tauri\terrarium-launcher.key"
    .\scripts\terrarium-release.ps1 -NotesFile .\notes.md        # або -Notes "текст"
@@ -31,7 +31,6 @@
    `-SkipBuild` — лише публікація вже зібраного інсталятора.
 4. Скрипт створює тег `vX.Y.Z` на поточному коміті і реліз з трьома асетами:
    `Terrarium-Launcher_X.Y.Z_x64-setup.exe`, `.exe.sig`, `latest.json`.
-5. Запушити гілку: `git push origin terrarium`.
 
 ## Перевірка
 
