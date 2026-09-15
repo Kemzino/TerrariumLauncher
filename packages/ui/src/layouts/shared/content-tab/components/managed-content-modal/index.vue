@@ -2,8 +2,10 @@
 import {
 	ArrowLeftRightIcon,
 	BoxIcon,
+	ChevronDownIcon,
 	ExternalIcon,
 	FileIcon,
+	FolderIcon,
 	GlassesIcon,
 	PaintbrushIcon,
 	SearchIcon,
@@ -51,6 +53,8 @@ interface Props {
 	showVersion?: boolean
 	showEnvironmentWarnings?: boolean
 	filterMode?: 'content' | 'status'
+	/** Terrarium: група мода (`mods/<Група>/`) — список показується по групах */
+	groupOf?: (item: ContentItem) => string | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -67,6 +71,7 @@ const props = withDefaults(defineProps<Props>(), {
 	showVersion: true,
 	showEnvironmentWarnings: false,
 	filterMode: 'content',
+	groupOf: undefined,
 })
 
 const emit = defineEmits<{
@@ -128,6 +133,10 @@ const messages = defineMessages({
 	disabled: {
 		id: 'instances.managed-content-modal.disabled',
 		defaultMessage: 'Disabled',
+	},
+	ungrouped: {
+		id: 'instances.managed-content-modal.ungrouped',
+		defaultMessage: 'Без групи',
 	},
 })
 
@@ -334,6 +343,37 @@ const tableItems = computed<ContentCardTableItem[]>(() =>
 		],
 	})),
 )
+// Секції по групах модів (як у вкладці «Уміст»); без groupOf — одна секція без заголовка
+interface ModalSection {
+	key: string
+	name: string | null
+	items: ContentCardTableItem[]
+}
+const UNGROUPED_KEY = '\u0000ungrouped'
+const collapsedSections = ref<Record<string, boolean>>({})
+const sections = computed<ModalSection[]>(() => {
+	if (!props.groupOf) return [{ key: 'all', name: null, items: tableItems.value }]
+	const byId = new Map(filteredItems.value.map((item) => [item.id, item]))
+	const buckets = new Map<string | null, ContentCardTableItem[]>()
+	for (const row of tableItems.value) {
+		const item = byId.get(row.id)
+		const group = item ? props.groupOf(item) : null
+		if (!buckets.has(group)) buckets.set(group, [])
+		buckets.get(group)!.push(row)
+	}
+	const result: ModalSection[] = []
+	for (const [name, rows] of buckets) {
+		if (name !== null) result.push({ key: name, name, items: rows })
+	}
+	result.sort((a, b) => a.name!.localeCompare(b.name!, undefined, { sensitivity: 'base' }))
+	const ungrouped = buckets.get(null)
+	if (ungrouped?.length) result.push({ key: UNGROUPED_KEY, name: null, items: ungrouped })
+	return result
+})
+function toggleSection(key: string) {
+	collapsedSections.value = { ...collapsedSections.value, [key]: !collapsedSections.value[key] }
+}
+
 const externalItemIds = computed(
 	() => new Set(items.value.filter((item) => item.external && !item.source).map((item) => item.id)),
 )
@@ -617,58 +657,81 @@ defineExpose({ show, showLoading, hide, getState, restore, updateItem, setItems 
 						</div>
 					</div>
 					<div ref="scrollContainer" class="min-h-0 overflow-y-auto">
-						<ContentCardTable
-							v-model:selected-ids="selectedIds"
-							:items="tableItems"
-							:highlighted-item-id="highlightedItemId"
-							:show-selection="props.enableToggle"
-							:show-item-actions="showTableActions"
-							:show-version="showVersion"
-							hide-delete
-							hide-header
-							flat
-							v-on="
-								props.enableToggle
-									? { 'update:enabled': (id: string, val: boolean) => handleEnabledChange(id, val) }
-									: {}
-							"
-						>
-							<template #itemTitleBadges="{ item }">
-								<span
-									v-if="externalItemIds.has(item.id)"
-									v-tooltip="formatMessage(messages.externalContentDescription)"
-									class="inline-flex shrink-0 items-center rounded-full border border-solid border-orange bg-orange-highlight px-2 py-0.5 text-xs font-semibold leading-4 text-orange"
-								>
-									{{ formatMessage(messages.externalContent) }}
+						<template v-for="section in sections" :key="section.key">
+							<button
+								v-if="props.groupOf"
+								type="button"
+								class="flex w-full cursor-pointer items-center gap-2 border-0 border-t border-solid border-surface-4 bg-surface-1 px-4 py-2 text-left text-contrast"
+								:aria-expanded="!collapsedSections[section.key]"
+								@click="toggleSection(section.key)"
+							>
+								<ChevronDownIcon
+									class="size-5 shrink-0 transition-transform"
+									:class="{ '-rotate-90': collapsedSections[section.key] }"
+								/>
+								<FolderIcon v-if="section.name" class="size-5 shrink-0 text-secondary" />
+								<span class="truncate font-semibold">
+									{{ section.name ?? formatMessage(messages.ungrouped) }}
 								</span>
-							</template>
-							<template #itemButtonsRight="{ item }">
-								<ButtonLink
-									v-if="externalSlicerUrls[item.id]"
-									v-tooltip="formatMessage(messages.openInSlicer)"
-									type="quiet"
-									:aria-label="formatMessage(messages.openInSlicer)"
-									:href="externalSlicerUrls[item.id]"
-									target="_blank"
-									rel="noopener noreferrer"
-									class="!w-9 !px-0 !rounded-full"
-								>
-									<ExternalIcon class="size-4" />
-								</ButtonLink>
-								<ButtonLink
-									v-if="externalUrls[item.id]"
-									v-tooltip="formatMessage(messages.downloadFile)"
-									type="quiet"
-									:aria-label="formatMessage(messages.downloadFile)"
-									:href="externalUrls[item.id]"
-									target="_blank"
-									rel="noopener noreferrer"
-									class="!w-9 !px-0 !rounded-full"
-								>
-									<FileIcon class="size-4" />
-								</ButtonLink>
-							</template>
-						</ContentCardTable>
+								<span class="text-sm text-secondary">{{ section.items.length }}</span>
+							</button>
+							<ContentCardTable
+								v-show="!collapsedSections[section.key]"
+								v-model:selected-ids="selectedIds"
+								:items="section.items"
+								:highlighted-item-id="highlightedItemId"
+								:show-selection="props.enableToggle"
+								:show-item-actions="showTableActions"
+								:show-version="showVersion"
+								hide-delete
+								hide-header
+								flat
+								v-on="
+									props.enableToggle
+										? {
+												'update:enabled': (id: string, val: boolean) =>
+													handleEnabledChange(id, val),
+											}
+										: {}
+								"
+							>
+								<template #itemTitleBadges="{ item }">
+									<span
+										v-if="externalItemIds.has(item.id)"
+										v-tooltip="formatMessage(messages.externalContentDescription)"
+										class="inline-flex shrink-0 items-center rounded-full border border-solid border-orange bg-orange-highlight px-2 py-0.5 text-xs font-semibold leading-4 text-orange"
+									>
+										{{ formatMessage(messages.externalContent) }}
+									</span>
+								</template>
+								<template #itemButtonsRight="{ item }">
+									<ButtonLink
+										v-if="externalSlicerUrls[item.id]"
+										v-tooltip="formatMessage(messages.openInSlicer)"
+										type="quiet"
+										:aria-label="formatMessage(messages.openInSlicer)"
+										:href="externalSlicerUrls[item.id]"
+										target="_blank"
+										rel="noopener noreferrer"
+										class="!w-9 !px-0 !rounded-full"
+									>
+										<ExternalIcon class="size-4" />
+									</ButtonLink>
+									<ButtonLink
+										v-if="externalUrls[item.id]"
+										v-tooltip="formatMessage(messages.downloadFile)"
+										type="quiet"
+										:aria-label="formatMessage(messages.downloadFile)"
+										:href="externalUrls[item.id]"
+										target="_blank"
+										rel="noopener noreferrer"
+										class="!w-9 !px-0 !rounded-full"
+									>
+										<FileIcon class="size-4" />
+									</ButtonLink>
+								</template>
+							</ContentCardTable>
+						</template>
 					</div>
 				</div>
 			</div>

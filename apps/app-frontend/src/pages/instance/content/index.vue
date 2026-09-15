@@ -27,6 +27,7 @@
 					:switch-version="
 						isServerInstance || isSharedMember || isQuarantined ? undefined : handleSwitchVersion
 					"
+					:group-of="managedGroupOf"
 					@update:enabled="handleManagedContentToggle"
 					@bulk:enable="(items) => handleManagedContentBulkToggle(items, true)"
 					@bulk:disable="(items) => handleManagedContentBulkToggle(items, false)"
@@ -1551,9 +1552,13 @@ async function afterModGroupChange() {
 	await initProjects('must_revalidate')
 }
 
+// Групи у вікні «Уміст збірки» — за тим самим шляхом файлу; там моди збірки
+// показуються всі, тож групи адміна видно й без «Показати моди збірки»
+const managedGroupOf = (item: ContentItem) => modGroupOf(item.file_path)
+
 const modGroups = {
 	groups: modGroupNames,
-	groupOf: (item: ContentItem) => modGroupOf(item.file_path),
+	groupOf: managedGroupOf,
 	canGroup: (item: ContentItem) =>
 		item.project_type === 'mod' && !!item.file_path && canMutateContent(item),
 	create: async (name: string) => {
@@ -1690,10 +1695,7 @@ function contentVersionLabel(item: ContentItem): string {
 
 // Terrarium: за замовчуванням у списку лише власний уміст гравця; моди збірки
 // можна підмішати перемикачем (щоб і їх розкласти по групах).
-const showPackContentInList = useSessionStorage(
-	`content-show-pack:${instance.value.id}`,
-	false,
-)
+const showPackContentInList = useSessionStorage(`content-show-pack:${instance.value.id}`, false)
 const listItems = computed<ContentItem[]>(() =>
 	showPackContentInList.value
 		? dedupeManagedContentItems([...mergedProjects.value, ...managedContentItems.value])

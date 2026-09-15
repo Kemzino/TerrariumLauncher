@@ -204,7 +204,7 @@ const installedTag = computed<string | null>(() => {
 	return packState.value.installed_tag
 })
 const publishModal = ref<InstanceType<typeof TerrariumPublishModal> | null>(null)
-// Адмін може прив'язати вже наявний примірник як «збірку Terrarium», а не качати її знову
+// Будь-хто може прив'язати вже наявний примірник як «збірку Terrarium», а не качати її знову
 const linkableInstances = computed(() => instancesQuery.data.value ?? [])
 const updateAvailable = computed(
 	() => installed.value && release.value !== null && release.value.tag !== installedTag.value,
@@ -489,10 +489,16 @@ const busyLabel = computed(() => {
 })
 
 // Якщо ключ додали/прибрали в налаштуваннях — перечитати реліз під актуальну збірку
-watch(isTester, (tester) => {
+watch(isTester, async (tester) => {
 	if (tester) return
-	if (activeChannel.value !== 'stable') void switchChannel('stable')
-	if (activePack.value !== 'client') void switchPack('client')
+	// Ключ видалено: канал/збірку вже могли скинути в налаштуваннях, тому не
+	// покладаємось на switch* (вони нічого не роблять, якщо значення те саме) —
+	// перечитуємо реліз завжди, інакше hero показує версію з тест-репо
+	if (activeChannel.value !== 'stable' || activePack.value !== 'client') {
+		await patchState({ active_pack: 'client', active_channel: 'stable' }).catch(handleError)
+	}
+	await refreshRelease()
+	await checkProcess()
 })
 
 onMounted(async () => {
@@ -648,7 +654,9 @@ onMounted(async () => {
 					{{ formatMessage(messages.testHint) }}
 				</p>
 
-				<div v-if="isAdmin" class="terrarium-hero__link">
+				<!-- Вибір примірника доступний усім: у гравця може бути кілька копій збірки
+				     (стара версія, свій примірник) — він сам обирає, яка «головна». -->
+				<div class="terrarium-hero__link">
 					<TerrariumInstancePicker
 						:instances="linkableInstances"
 						:current="instance"

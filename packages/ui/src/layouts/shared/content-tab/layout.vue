@@ -95,6 +95,14 @@ const messages = defineMessages({
 	groupMoveTo: { id: 'content.mod-groups.move-to', defaultMessage: 'У групу' },
 	groupRemoveFrom: { id: 'content.mod-groups.remove-from', defaultMessage: 'Прибрати з групи' },
 	groupEmpty: { id: 'content.mod-groups.empty', defaultMessage: 'Порожня група' },
+	groupShowEmpty: {
+		id: 'content.mod-groups.show-empty',
+		defaultMessage: 'Показати порожні групи ({count})',
+	},
+	groupHideEmpty: {
+		id: 'content.mod-groups.hide-empty',
+		defaultMessage: 'Сховати порожні групи ({count})',
+	},
 	groupAllContent: {
 		id: 'content.mod-groups.all-content',
 		defaultMessage: 'Увесь уміст — зі збірки та твій',
@@ -522,7 +530,7 @@ interface GroupedSection {
 	items: ContentCardTableItem[]
 }
 
-const groupedSections = computed<GroupedSection[]>(() => {
+const allGroupedSections = computed<GroupedSection[]>(() => {
 	if (!modGroups) return []
 	const byId = new Map(filteredItems.value.map((item) => [getItemId(item), item]))
 	const buckets = new Map<string | null, ContentCardTableItem[]>()
@@ -546,6 +554,19 @@ const groupedSections = computed<GroupedSection[]>(() => {
 	return sections
 })
 
+// Групи без видимих модів (усе, що в них, — моди збірки, які зараз сховані, або
+// група щойно створена) не показуємо, щоб не захаращувати список; кнопка нижче
+// їх розкриває. Створення групи вмикає показ, інакше нікуди перетягувати.
+const showEmptyGroups = ref(false)
+const emptyGroupsCount = computed(
+	() => allGroupedSections.value.filter((s) => s.name !== null && s.items.length === 0).length,
+)
+const groupedSections = computed<GroupedSection[]>(() =>
+	showEmptyGroups.value
+		? allGroupedSections.value
+		: allGroupedSections.value.filter((s) => s.name === null || s.items.length > 0),
+)
+
 function isGroupCollapsed(key: string) {
 	return !!collapsedGroups.value[key]
 }
@@ -555,7 +576,10 @@ function toggleGroupCollapsed(key: string) {
 }
 
 function promptCreateGroup() {
-	modGroupNameModal.value?.show('create', '', (name) => modGroups!.create(name))
+	modGroupNameModal.value?.show('create', '', async (name) => {
+		await modGroups!.create(name)
+		showEmptyGroups.value = true
+	})
 }
 
 function promptRenameGroup(name: string) {
@@ -1609,10 +1633,24 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 										</ContentCardTable>
 									</div>
 								</section>
-								<div>
+								<div class="flex flex-wrap items-center gap-2">
 									<Button type="outlined" @click="promptCreateGroup">
 										<PlusIcon />
 										{{ formatMessage(messages.groupNew) }}
+									</Button>
+									<Button
+										v-if="emptyGroupsCount > 0"
+										type="transparent"
+										@click="showEmptyGroups = !showEmptyGroups"
+									>
+										<EyeOffIcon v-if="showEmptyGroups" />
+										<EyeIcon v-else />
+										{{
+											formatMessage(
+												showEmptyGroups ? messages.groupHideEmpty : messages.groupShowEmpty,
+												{ count: emptyGroupsCount },
+											)
+										}}
 									</Button>
 								</div>
 							</div>
