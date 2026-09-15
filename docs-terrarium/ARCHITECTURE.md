@@ -82,7 +82,7 @@ terrarium-pack (public)
 - Ліміти: 2 ГБ на асет; трафік Releases для публічних репо не тарифікується. **Git LFS не чіпаємо.**
 - Пак робимо **Modrinth-first**: частина модів на CurseForge має вимкнені сторонні завантаження → 403.
 - Публічний ключ підпису вшитий у лаунчер. Без підпису компрометація репо = RCE в усіх гравців.
-- Самооновлення лаунчера — Tauri updater, окремий репо `terrarium-launcher`.
+- Самооновлення лаунчера — Tauri updater; маніфест `releases/latest/download/latest.json` у цьому ж репо. Процес: `docs-terrarium/RELEASE.md`.
 
 ## Юридичне
 
