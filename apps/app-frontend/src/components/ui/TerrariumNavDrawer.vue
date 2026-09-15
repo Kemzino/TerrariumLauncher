@@ -4,6 +4,7 @@ import {
 	BoxesIcon,
 	CompassIcon,
 	DiscordIcon,
+	GithubIcon,
 	HomeIcon,
 	ImageIcon,
 	LibraryIcon,
@@ -30,6 +31,7 @@ const messages = defineMessages({
 	sectionCommunity: { id: 'terrarium.nav.section-community', defaultMessage: 'Спільнота' },
 	linkRules: { id: 'terrarium.links.rules', defaultMessage: 'Правила сервера' },
 	linkDiscord: { id: 'terrarium.links.discord', defaultMessage: 'Наш Discord' },
+	linkGithub: { id: 'terrarium.links.github', defaultMessage: 'Вихідний код на GitHub' },
 	menu: { id: 'terrarium.nav.menu', defaultMessage: 'Меню' },
 	close: { id: 'terrarium.nav.close', defaultMessage: 'Закрити меню' },
 	home: { id: 'terrarium.nav.home', defaultMessage: 'Головна' },
@@ -151,6 +153,14 @@ watch(
 							@click="openTerrariumLink('rules')"
 						>
 							<BookOpenIcon />
+						</button>
+						<button
+							v-tooltip="formatMessage(messages.linkGithub)"
+							class="terrarium-nav__link"
+							:aria-label="formatMessage(messages.linkGithub)"
+							@click="openTerrariumLink('github')"
+						>
+							<GithubIcon />
 						</button>
 					</div>
 				</nav>

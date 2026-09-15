@@ -4,6 +4,7 @@ import {
 	ChevronDownIcon,
 	DiscordIcon,
 	DownloadIcon,
+	GithubIcon,
 	GlobeIcon,
 	ModrinthIcon,
 	PackageOpenIcon,
@@ -63,7 +64,8 @@ const messages = defineMessages({
 	linkRules: { id: 'terrarium.links.rules', defaultMessage: 'Правила сервера' },
 	keyRejectedHint: {
 		id: 'terrarium.hero.key-rejected',
-		defaultMessage: 'GitHub відхилив ключ доступу (відкликано або перевидано) — онови його в налаштуваннях.',
+		defaultMessage:
+			'GitHub відхилив ключ доступу (відкликано або перевидано) — онови його в налаштуваннях.',
 	},
 	noAccessHint: {
 		id: 'terrarium.hero.no-access',
@@ -79,8 +81,7 @@ const messages = defineMessages({
 	},
 	testHint: {
 		id: 'terrarium.hero.test-hint',
-		defaultMessage:
-			'Тестова версія ставиться окремим примірником — основна гра не змінюється.',
+		defaultMessage: 'Тестова версія ставиться окремим примірником — основна гра не змінюється.',
 	},
 	promote: { id: 'terrarium.hero.promote', defaultMessage: 'Поширити для всіх' },
 	promoteConfirm: { id: 'terrarium.hero.promote-confirm', defaultMessage: 'Точно? Натисни ще раз' },
@@ -94,6 +95,7 @@ const messages = defineMessages({
 		defaultMessage: 'Поки гра запущена, моди лежать у корені mods/ — закрий гру перед публікацією',
 	},
 	linkDiscord: { id: 'terrarium.links.discord', defaultMessage: 'Наш Discord' },
+	linkGithub: { id: 'terrarium.links.github', defaultMessage: 'Вихідний код на GitHub' },
 	title: { id: 'terrarium.hero.title', defaultMessage: 'Terrarium' },
 	eyebrow: { id: 'terrarium.hero.eyebrow', defaultMessage: 'Minecraft · збірка спільноти' },
 	eyebrowServer: { id: 'terrarium.hero.eyebrow-server', defaultMessage: 'Серверна збірка' },
@@ -558,7 +560,11 @@ onMounted(async () => {
 					</span>
 				</div>
 				<h1 class="terrarium-hero__title">
-					<img :src="terrariumLogo" :alt="formatMessage(messages.title)" class="terrarium-hero__logo" />
+					<img
+						:src="terrariumLogo"
+						:alt="formatMessage(messages.title)"
+						class="terrarium-hero__logo"
+					/>
 				</h1>
 				<p class="terrarium-hero__subtitle">
 					{{ isServer ? formatMessage(messages.subtitleServer) : formatMessage(messages.subtitle) }}
@@ -621,7 +627,10 @@ onMounted(async () => {
 								: formatMessage(messages.offlineHint)
 					}}
 				</p>
-				<p v-else-if="isTest && !checking && release && !release.prerelease" class="terrarium-hero__hint">
+				<p
+					v-else-if="isTest && !checking && release && !release.prerelease"
+					class="terrarium-hero__hint"
+				>
 					{{ formatMessage(messages.noTestRelease) }}
 				</p>
 				<p v-else-if="isTest && !checking" class="terrarium-hero__hint">
@@ -654,7 +663,9 @@ onMounted(async () => {
 							@click="install"
 						>
 							<DownloadIcon />
-							{{ isServer ? formatMessage(messages.installServer) : formatMessage(messages.install) }}
+							{{
+								isServer ? formatMessage(messages.installServer) : formatMessage(messages.install)
+							}}
 						</Button>
 					</template>
 					<template v-else-if="updateAvailable">
@@ -746,6 +757,15 @@ onMounted(async () => {
 						@click="openTerrariumLink('rules')"
 					>
 						<BookOpenIcon />
+					</button>
+					<button
+						v-tooltip="formatMessage(messages.linkGithub)"
+						type="button"
+						class="terrarium-hero__social-btn"
+						:aria-label="formatMessage(messages.linkGithub)"
+						@click="openTerrariumLink('github')"
+					>
+						<GithubIcon />
 					</button>
 				</div>
 				<aside v-if="!isServer" class="terrarium-hero__account">

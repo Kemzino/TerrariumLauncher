@@ -4,6 +4,8 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 export const TERRARIUM_LINKS = {
 	rules: 'https://terrarium-2.gitbook.io/terrarium-create/zagalna-informaciya/pravila-servera',
 	discord: 'https://discord.com/invite/S7NUwdGQHZ',
+	/** Вихідний код лаунчера — відкритий замість ліцензії */
+	github: 'https://github.com/Kemzino/TerrariumLauncher',
 } as const
 
 export function openTerrariumLink(key: keyof typeof TERRARIUM_LINKS) {
