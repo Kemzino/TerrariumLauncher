@@ -141,40 +141,49 @@ export interface PublishedRelease {
 // ---------------------------------------------------------------------------
 // Синхронізація між клієнтською та серверною збірками (адмін)
 
-export type SyncKind = 'mod_group' | 'config'
+export type SyncKind = 'mod' | 'config'
+export type SyncStatus = 'same' | 'differs' | 'client_only' | 'server_only'
 
-export interface SyncEntry {
+/** Один файл у порівнянні: як він є в клієнта і на сервері */
+export interface SyncFile {
 	kind: SyncKind
-	/** Назва групи (`''` — без групи) або шлях конфігу (`config/jei`, `kubejs`) */
+	/** Мод — ім'я jar-а; конфіг — шлях від примірника (`config/jei/x.json`) */
 	key: string
 	name: string
-	files: number
-	new_files: number
-	changed_files: number
-	size: number
+	client_size: number | null
+	server_size: number | null
+	client_group: string | null
+	server_group: string | null
+	status: SyncStatus
+}
+
+export interface SyncSection {
+	kind: SyncKind
+	/** Мод — назва групи (`''` — без групи); конфіг — `config/<запис>` або корінь */
+	key: string
+	name: string
+	files: SyncFile[]
 }
 
 export interface SyncPreview {
-	groups: SyncEntry[]
-	configs: SyncEntry[]
+	sections: SyncSection[]
 }
 
 export interface SyncRequest {
-	source_instance_id: string
-	target_instance_id: string
-	groups: string[]
-	configs: string[]
+	client_instance_id: string
+	server_instance_id: string
+	to_server: string[]
+	to_client: string[]
 }
 
 export interface SyncResult {
 	copied: number
-	skipped_same: number
 }
 
-export async function terrarium_sync_preview(sourceInstanceId: string, targetInstanceId: string) {
+export async function terrarium_sync_preview(clientInstanceId: string, serverInstanceId: string) {
 	return await invoke<SyncPreview>('plugin:terrarium|terrarium_sync_preview', {
-		sourceInstanceId,
-		targetInstanceId,
+		clientInstanceId,
+		serverInstanceId,
 	})
 }
 

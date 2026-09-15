@@ -2,6 +2,7 @@
 import {
 	ArrowLeftIcon,
 	ArrowRightIcon,
+	ChevronDownIcon,
 	FolderIcon,
 	SettingsIcon,
 	SpinnerIcon,
@@ -20,8 +21,9 @@ import { computed, ref } from 'vue'
 
 import {
 	type PackKind,
-	type SyncEntry,
+	type SyncFile,
 	type SyncPreview,
+	type SyncSection,
 	terrarium_sync_apply,
 	terrarium_sync_preview,
 } from '@/helpers/terrarium'
@@ -34,89 +36,128 @@ const messages = defineMessages({
 	intro: {
 		id: 'terrarium.sync.intro',
 		defaultMessage:
-			'Зліва — клієнтська збірка, справа — серверна. Познач групи модів чи конфіги з одного боку і перенеси їх на інший. У цілі нічого зайвого не видаляється — лише замінюються файли з тим самим іменем.',
+			'Кожен рядок — файл: зліва як він у клієнтській збірці, справа — у серверній. Познач файли з того боку, звідки їх узяти, і перенеси на інший. У цілі нічого не видаляється — лише замінюються файли з тим самим іменем.',
 	},
 	client: { id: 'terrarium.sync.client', defaultMessage: 'Клієнт' },
 	server: { id: 'terrarium.sync.server', defaultMessage: 'Сервер' },
-	groups: { id: 'terrarium.sync.groups', defaultMessage: 'Групи модів' },
+	file: { id: 'terrarium.sync.file', defaultMessage: 'Файл' },
+	mods: { id: 'terrarium.sync.mods', defaultMessage: 'Моди' },
 	configs: { id: 'terrarium.sync.configs', defaultMessage: 'Конфіги' },
 	ungrouped: { id: 'terrarium.sync.ungrouped', defaultMessage: 'Без групи' },
-	nothing: { id: 'terrarium.sync.nothing', defaultMessage: 'Порожньо' },
+	missing: { id: 'terrarium.sync.missing', defaultMessage: 'немає' },
 	loading: { id: 'terrarium.sync.loading', defaultMessage: 'Порівнюю збірки…' },
-	filesLine: {
-		id: 'terrarium.sync.files-line',
-		defaultMessage: '{count, plural, one {# файл} few {# файли} other {# файлів}} · {size}',
+	onlyDiff: { id: 'terrarium.sync.only-diff', defaultMessage: 'Лише відмінності' },
+	diffCount: {
+		id: 'terrarium.sync.diff-count',
+		defaultMessage:
+			'{count, plural, =0 {без відмінностей} one {# відмінність} few {# відмінності} other {# відмінностей}}',
 	},
-	newBadge: { id: 'terrarium.sync.new-badge', defaultMessage: '{count} нових' },
-	changedBadge: { id: 'terrarium.sync.changed-badge', defaultMessage: '{count} змін.' },
-	sameBadge: { id: 'terrarium.sync.same-badge', defaultMessage: 'збігається' },
-	selectChanged: { id: 'terrarium.sync.select-changed', defaultMessage: 'Обрати з відмінностями' },
-	clear: { id: 'terrarium.sync.clear', defaultMessage: 'Зняти' },
+	sectionAllToServer: { id: 'terrarium.sync.section-to-server', defaultMessage: 'усе →' },
+	sectionAllToClient: { id: 'terrarium.sync.section-to-client', defaultMessage: '← усе' },
+	statusSame: { id: 'terrarium.sync.status-same', defaultMessage: 'однакові' },
+	statusDiffers: { id: 'terrarium.sync.status-differs', defaultMessage: 'відрізняються' },
+	statusClientOnly: { id: 'terrarium.sync.status-client-only', defaultMessage: 'лише клієнт' },
+	statusServerOnly: { id: 'terrarium.sync.status-server-only', defaultMessage: 'лише сервер' },
+	inGroup: { id: 'terrarium.sync.in-group', defaultMessage: 'у групі «{group}»' },
 	toServer: { id: 'terrarium.sync.to-server', defaultMessage: 'На сервер ({count})' },
 	toClient: { id: 'terrarium.sync.to-client', defaultMessage: 'На клієнт ({count})' },
+	apply: { id: 'terrarium.sync.apply', defaultMessage: 'Перенести' },
 	applying: { id: 'terrarium.sync.applying', defaultMessage: 'Переношу…' },
 	done: {
 		id: 'terrarium.sync.done',
-		defaultMessage:
-			'Перенесено {copied, plural, one {# файл} few {# файли} other {# файлів}}, без змін: {same}',
+		defaultMessage: 'Перенесено {copied, plural, one {# файл} few {# файли} other {# файлів}}',
 	},
+	nothing: { id: 'terrarium.sync.nothing', defaultMessage: 'В обох збірках порожньо' },
 })
 
 const modal = ref<InstanceType<typeof NewModal>>()
 const clientId = ref<string | null>(null)
 const serverId = ref<string | null>(null)
 const loading = ref(false)
-const busy = ref<PackKind | null>(null)
-
-/** Що є з кожного боку (з різницею відносно протилежного). */
-const previews = ref<Record<PackKind, SyncPreview | null>>({ client: null, server: null })
-const selected = ref<Record<PackKind, Record<string, boolean>>>({ client: {}, server: {} })
+const busy = ref(false)
+const preview = ref<SyncPreview | null>(null)
+const onlyDiff = ref(true)
+const collapsed = ref<Record<string, boolean>>({})
+/** Обрані файли: з клієнта на сервер / із сервера на клієнт (ключі SyncFile.key). */
+const toServer = ref<Record<string, boolean>>({})
+const toClient = ref<Record<string, boolean>>({})
 
 const emit = defineEmits<{ synced: [target: PackKind] }>()
 
-const SIDES: PackKind[] = ['client', 'server']
-const BLOCKS = ['groups', 'configs'] as const
+function sectionKey(section: SyncSection) {
+	return `${section.kind}:${section.key}`
+}
+function isDiff(file: SyncFile) {
+	return file.status !== 'same'
+}
+function sectionTitle(section: SyncSection) {
+	if (section.kind === 'mod') {
+		return section.key ? section.name : formatMessage(messages.ungrouped)
+	}
+	return section.name
+}
+function diffCount(section: SyncSection) {
+	return section.files.filter(isDiff).length
+}
 
-function idOf(side: PackKind) {
-	return side === 'client' ? clientId.value : serverId.value
+const visibleSections = computed(() => {
+	if (!preview.value) return []
+	return preview.value.sections
+		.map((section) => ({
+			section,
+			files: onlyDiff.value ? section.files.filter(isDiff) : section.files,
+		}))
+		.filter((s) => s.files.length > 0)
+})
+const modSections = computed(() => visibleSections.value.filter((s) => s.section.kind === 'mod'))
+const configSections = computed(() =>
+	visibleSections.value.filter((s) => s.section.kind === 'config'),
+)
+
+const toServerCount = computed(() => Object.values(toServer.value).filter(Boolean).length)
+const toClientCount = computed(() => Object.values(toClient.value).filter(Boolean).length)
+
+function isCollapsed(section: SyncSection) {
+	const key = sectionKey(section)
+	// Секції без відмінностей згорнуті за замовчуванням
+	return collapsed.value[key] ?? diffCount(section) === 0
 }
-function otherSide(side: PackKind): PackKind {
-	return side === 'client' ? 'server' : 'client'
-}
-function keyOf(entry: SyncEntry) {
-	return `${entry.kind}:${entry.key}`
-}
-function hasDiff(entry: SyncEntry) {
-	return entry.new_files > 0 || entry.changed_files > 0
+function toggleCollapsed(section: SyncSection) {
+	const key = sectionKey(section)
+	collapsed.value = { ...collapsed.value, [key]: !isCollapsed(section) }
 }
 
-function selectedEntries(side: PackKind) {
-	const p = previews.value[side]
-	if (!p) return { groups: [] as SyncEntry[], configs: [] as SyncEntry[] }
-	const chosen = selected.value[side]
-	return {
-		groups: p.groups.filter((e) => chosen[keyOf(e)]),
-		configs: p.configs.filter((e) => chosen[keyOf(e)]),
+/** Файл можна взяти з боку, де він є; вибір однієї сторони знімає іншу. */
+function pickToServer(file: SyncFile, value: boolean) {
+	if (file.client_size === null) return
+	toServer.value = { ...toServer.value, [file.key]: value }
+	if (value && toClient.value[file.key]) {
+		toClient.value = { ...toClient.value, [file.key]: false }
 	}
 }
-const selectedCount = computed<Record<PackKind, number>>(() => ({
-	client: selectedEntries('client').groups.length + selectedEntries('client').configs.length,
-	server: selectedEntries('server').groups.length + selectedEntries('server').configs.length,
-}))
+function pickToClient(file: SyncFile, value: boolean) {
+	if (file.server_size === null) return
+	toClient.value = { ...toClient.value, [file.key]: value }
+	if (value && toServer.value[file.key]) {
+		toServer.value = { ...toServer.value, [file.key]: false }
+	}
+}
+function sectionAll(files: SyncFile[], direction: PackKind) {
+	for (const file of files) {
+		if (!isDiff(file)) continue
+		if (direction === 'server') pickToServer(file, true)
+		else pickToClient(file, true)
+	}
+}
 
 async function load() {
-	const client = clientId.value
-	const server = serverId.value
-	if (!client || !server) return
+	if (!clientId.value || !serverId.value) return
 	loading.value = true
-	previews.value = { client: null, server: null }
-	selected.value = { client: {}, server: {} }
+	preview.value = null
+	toServer.value = {}
+	toClient.value = {}
 	try {
-		const [fromClient, fromServer] = await Promise.all([
-			terrarium_sync_preview(client, server),
-			terrarium_sync_preview(server, client),
-		])
-		previews.value = { client: fromClient, server: fromServer }
+		preview.value = await terrarium_sync_preview(clientId.value, serverId.value)
 	} catch (err) {
 		handleError(err)
 	} finally {
@@ -124,69 +165,68 @@ async function load() {
 	}
 }
 
-function selectChanged(side: PackKind) {
-	const p = previews.value[side]
-	if (!p) return
-	const next: Record<string, boolean> = {}
-	for (const entry of [...p.groups, ...p.configs]) next[keyOf(entry)] = hasDiff(entry)
-	selected.value = { ...selected.value, [side]: next }
-}
-
-function clearSide(side: PackKind) {
-	selected.value = { ...selected.value, [side]: {} }
-}
-
-function toggle(side: PackKind, entry: SyncEntry, value?: boolean) {
-	const key = keyOf(entry)
-	const current = selected.value[side]
-	selected.value = {
-		...selected.value,
-		[side]: { ...current, [key]: value ?? !current[key] },
-	}
-}
-
-async function apply(from: PackKind) {
-	const source = idOf(from)
-	const target = idOf(otherSide(from))
-	if (!source || !target || selectedCount.value[from] === 0 || busy.value) return
-	busy.value = from
+async function apply() {
+	if (!clientId.value || !serverId.value || busy.value) return
+	const server = Object.entries(toServer.value)
+		.filter(([, v]) => v)
+		.map(([k]) => k)
+	const client = Object.entries(toClient.value)
+		.filter(([, v]) => v)
+		.map(([k]) => k)
+	if (server.length === 0 && client.length === 0) return
+	busy.value = true
 	try {
-		const chosen = selectedEntries(from)
 		const result = await terrarium_sync_apply({
-			source_instance_id: source,
-			target_instance_id: target,
-			groups: chosen.groups.map((e) => e.key),
-			configs: chosen.configs.map((e) => e.key),
+			client_instance_id: clientId.value,
+			server_instance_id: serverId.value,
+			to_server: server,
+			to_client: client,
 		})
 		addNotification({
 			type: 'success',
-			title: formatMessage(messages.done, {
-				copied: result.copied,
-				same: result.skipped_same,
-			}),
+			title: formatMessage(messages.done, { copied: result.copied }),
 		})
-		emit('synced', otherSide(from))
+		if (server.length) emit('synced', 'server')
+		if (client.length) emit('synced', 'client')
 		await load()
 	} catch (err) {
 		handleError(err)
 	} finally {
-		busy.value = null
+		busy.value = false
 	}
 }
 
-function formatSize(bytes: number) {
+function formatSize(bytes: number | null) {
+	if (bytes === null) return formatMessage(messages.missing)
 	if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} ГБ`
 	if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} МБ`
 	return `${Math.max(1, Math.round(bytes / 1e3))} КБ`
 }
 
-function entryName(entry: SyncEntry) {
-	return entry.kind === 'mod_group' && !entry.key ? formatMessage(messages.ungrouped) : entry.name
+function statusLabel(file: SyncFile) {
+	switch (file.status) {
+		case 'same':
+			return formatMessage(messages.statusSame)
+		case 'differs':
+			return formatMessage(messages.statusDiffers)
+		case 'client_only':
+			return formatMessage(messages.statusClientOnly)
+		default:
+			return formatMessage(messages.statusServerOnly)
+	}
+}
+
+/** Підпис комірки: розмір і, якщо мод лежить в іншій групі, ніж секція, — де саме. */
+function cellNote(file: SyncFile, side: PackKind, section: SyncSection) {
+	const group = side === 'client' ? file.client_group : file.server_group
+	if (file.kind !== 'mod' || group === null || group === section.key) return null
+	return formatMessage(messages.inGroup, { group })
 }
 
 async function show(client: string, server: string) {
 	clientId.value = client
 	serverId.value = server
+	collapsed.value = {}
 	modal.value?.show()
 	await load()
 }
@@ -199,7 +239,7 @@ defineExpose({ show })
 		ref="modal"
 		:header="formatMessage(messages.header)"
 		scrollable
-		width="64rem"
+		width="72rem"
 		max-width="calc(100vw - 2rem)"
 	>
 		<div class="flex flex-col gap-4">
@@ -209,111 +249,134 @@ defineExpose({ show })
 				<SpinnerIcon class="animate-spin" /> {{ formatMessage(messages.loading) }}
 			</div>
 
-			<div v-else class="sync-columns">
-				<section v-for="side in SIDES" :key="side" class="sync-column">
-					<header class="sync-column__head">
-						<h3 class="sync-column__title">
-							{{ formatMessage(side === 'client' ? messages.client : messages.server) }}
-						</h3>
-						<div class="flex items-center gap-1">
-							<Button size="sm" type="transparent" @click="selectChanged(side)">
-								{{ formatMessage(messages.selectChanged) }}
-							</Button>
-							<Button
-								v-if="selectedCount[side] > 0"
-								size="sm"
-								type="transparent"
-								@click="clearSide(side)"
-							>
-								{{ formatMessage(messages.clear) }}
-							</Button>
-						</div>
-					</header>
+			<template v-else-if="preview">
+				<div class="flex flex-wrap items-center justify-between gap-2">
+					<Checkbox v-model="onlyDiff" :label="formatMessage(messages.onlyDiff)" />
+				</div>
 
-					<template v-if="previews[side]">
-						<div v-for="block in BLOCKS" :key="block" class="sync-block">
-							<h4 class="sync-block__title">
-								<FolderIcon v-if="block === 'groups'" />
-								<SettingsIcon v-else />
-								{{ formatMessage(block === 'groups' ? messages.groups : messages.configs) }}
-							</h4>
-							<p v-if="previews[side]![block].length === 0" class="sync-empty">
-								{{ formatMessage(messages.nothing) }}
-							</p>
-							<div v-else class="sync-list">
-								<div
-									v-for="entry in previews[side]![block]"
-									:key="keyOf(entry)"
-									class="sync-item"
-									:class="{ 'is-same': !hasDiff(entry) }"
-									@click="toggle(side, entry)"
+				<p v-if="visibleSections.length === 0" class="m-0 text-secondary">
+					{{ formatMessage(messages.nothing) }}
+				</p>
+
+				<div v-else class="sync-table">
+					<div class="sync-row sync-row--head">
+						<span class="sync-cell sync-cell--side sync-cell--client">
+							{{ formatMessage(messages.client) }}
+						</span>
+						<span class="sync-cell sync-cell--name">{{ formatMessage(messages.file) }}</span>
+						<span class="sync-cell sync-cell--side sync-cell--server">
+							{{ formatMessage(messages.server) }}
+						</span>
+					</div>
+
+					<template
+						v-for="group in [modSections, configSections]"
+						:key="group === modSections ? 'mods' : 'configs'"
+					>
+						<div v-if="group.length" class="sync-kind">
+							<FolderIcon v-if="group === modSections" />
+							<SettingsIcon v-else />
+							{{ formatMessage(group === modSections ? messages.mods : messages.configs) }}
+						</div>
+						<template v-for="{ section, files } in group" :key="sectionKey(section)">
+							<div class="sync-section">
+								<button
+									type="button"
+									class="sync-section__toggle"
+									:aria-expanded="!isCollapsed(section)"
+									@click="toggleCollapsed(section)"
 								>
-									<Checkbox
-										:model-value="!!selected[side][keyOf(entry)]"
-										@click.stop
-										@update:model-value="toggle(side, entry, $event)"
+									<ChevronDownIcon
+										class="sync-section__chevron"
+										:class="{ 'is-collapsed': isCollapsed(section) }"
 									/>
-									<span class="sync-item__text">
-										<span class="sync-item__name" :title="entry.key">{{ entryName(entry) }}</span>
-										<span class="sync-item__sub">
-											{{
-												formatMessage(messages.filesLine, {
-													count: entry.files,
-													size: formatSize(entry.size),
-												})
-											}}
+									<span class="sync-section__name">{{ sectionTitle(section) }}</span>
+									<span class="sync-section__count">
+										{{ formatMessage(messages.diffCount, { count: diffCount(section) }) }}
+									</span>
+								</button>
+								<span v-if="diffCount(section) > 0" class="sync-section__actions">
+									<button type="button" @click="sectionAll(section.files, 'client')">
+										{{ formatMessage(messages.sectionAllToClient) }}
+									</button>
+									<button type="button" @click="sectionAll(section.files, 'server')">
+										{{ formatMessage(messages.sectionAllToServer) }}
+									</button>
+								</span>
+							</div>
+							<template v-if="!isCollapsed(section)">
+								<div
+									v-for="file in files"
+									:key="file.key"
+									class="sync-row"
+									:class="`is-${file.status}`"
+								>
+									<span class="sync-cell sync-cell--side sync-cell--client">
+										<Checkbox
+											v-if="file.client_size !== null"
+											:model-value="!!toServer[file.key]"
+											:disabled="file.status === 'same'"
+											@update:model-value="pickToServer(file, $event)"
+										/>
+										<span
+											class="sync-cell__meta"
+											:class="{ 'is-missing': file.client_size === null }"
+										>
+											{{ formatSize(file.client_size) }}
+											<small v-if="cellNote(file, 'client', section)">{{
+												cellNote(file, 'client', section)
+											}}</small>
 										</span>
 									</span>
-									<span v-if="entry.new_files" class="sync-item__tag is-new">
-										{{ formatMessage(messages.newBadge, { count: entry.new_files }) }}
+									<span class="sync-cell sync-cell--name">
+										<span class="sync-cell__name" :title="file.key">{{ file.name }}</span>
+										<span class="sync-cell__status">{{ statusLabel(file) }}</span>
 									</span>
-									<span v-if="entry.changed_files" class="sync-item__tag is-changed">
-										{{ formatMessage(messages.changedBadge, { count: entry.changed_files }) }}
-									</span>
-									<span v-if="!hasDiff(entry)" class="sync-item__tag">
-										{{ formatMessage(messages.sameBadge) }}
+									<span class="sync-cell sync-cell--side sync-cell--server">
+										<span
+											class="sync-cell__meta"
+											:class="{ 'is-missing': file.server_size === null }"
+										>
+											{{ formatSize(file.server_size) }}
+											<small v-if="cellNote(file, 'server', section)">{{
+												cellNote(file, 'server', section)
+											}}</small>
+										</span>
+										<Checkbox
+											v-if="file.server_size !== null"
+											:model-value="!!toClient[file.key]"
+											:disabled="file.status === 'same'"
+											@update:model-value="pickToClient(file, $event)"
+										/>
 									</span>
 								</div>
-							</div>
-						</div>
+							</template>
+						</template>
 					</template>
-				</section>
-			</div>
+				</div>
+			</template>
 		</div>
 		<template #actions>
 			<div class="flex flex-wrap items-center justify-between gap-2">
-				<Button type="outlined" :disabled="!!busy" @click="modal?.hide()">
+				<Button type="outlined" :disabled="busy" @click="modal?.hide()">
 					<XIcon />
 					{{ formatMessage(commonMessages.cancelButton) }}
 				</Button>
 				<div class="flex items-center gap-2">
+					<span v-if="toClientCount" class="sync-pill">
+						<ArrowLeftIcon /> {{ formatMessage(messages.toClient, { count: toClientCount }) }}
+					</span>
+					<span v-if="toServerCount" class="sync-pill">
+						{{ formatMessage(messages.toServer, { count: toServerCount }) }} <ArrowRightIcon />
+					</span>
 					<Button
 						type="colored"
 						color="brand"
-						:disabled="!!busy || loading || selectedCount.server === 0"
-						@click="apply('server')"
+						:disabled="busy || loading || (toServerCount === 0 && toClientCount === 0)"
+						@click="apply"
 					>
-						<SpinnerIcon v-if="busy === 'server'" class="animate-spin" />
-						<ArrowLeftIcon v-else />
-						{{
-							busy === 'server'
-								? formatMessage(messages.applying)
-								: formatMessage(messages.toClient, { count: selectedCount.server })
-						}}
-					</Button>
-					<Button
-						type="colored"
-						color="brand"
-						:disabled="!!busy || loading || selectedCount.client === 0"
-						@click="apply('client')"
-					>
-						<SpinnerIcon v-if="busy === 'client'" class="animate-spin" />
-						<ArrowRightIcon v-else />
-						{{
-							busy === 'client'
-								? formatMessage(messages.applying)
-								: formatMessage(messages.toServer, { count: selectedCount.client })
-						}}
+						<SpinnerIcon v-if="busy" class="animate-spin" />
+						{{ busy ? formatMessage(messages.applying) : formatMessage(messages.apply) }}
 					</Button>
 				</div>
 			</div>
@@ -322,49 +385,110 @@ defineExpose({ show })
 </template>
 
 <style scoped lang="scss">
-.sync-columns {
-	display: grid;
-	grid-template-columns: 1fr 1fr;
-	gap: 1rem;
+.sync-table {
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--color-divider);
+	border-radius: var(--radius-lg);
+	overflow: hidden;
+}
 
-	@media (max-width: 800px) {
-		grid-template-columns: 1fr;
+.sync-row {
+	display: grid;
+	grid-template-columns: minmax(9rem, 1fr) minmax(0, 2fr) minmax(9rem, 1fr);
+	align-items: center;
+	border-top: 1px solid var(--color-divider);
+
+	&--head {
+		border-top: 0;
+		background: var(--color-bg);
+		font-weight: 700;
+		color: var(--color-contrast);
+	}
+
+	&.is-client_only .sync-cell--server,
+	&.is-server_only .sync-cell--client {
+		opacity: 0.5;
+	}
+
+	&.is-same {
+		opacity: 0.6;
 	}
 }
 
-.sync-column {
-	display: flex;
-	flex-direction: column;
-	gap: 0.75rem;
-	min-width: 0;
-	border: 1px solid var(--color-divider);
-	border-radius: var(--radius-lg);
-	padding: 0.75rem;
-}
-
-.sync-column__head {
+.sync-cell {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
 	gap: 0.5rem;
-	flex-wrap: wrap;
+	min-width: 0;
+	padding: 0.4rem 0.75rem;
+
+	&--client {
+		justify-content: flex-start;
+		border-right: 1px solid var(--color-divider);
+	}
+
+	&--server {
+		justify-content: flex-end;
+		border-left: 1px solid var(--color-divider);
+	}
+
+	&--name {
+		flex-direction: column;
+		align-items: center;
+		gap: 0.05rem;
+		text-align: center;
+	}
 }
 
-.sync-column__title {
-	margin: 0;
-	font-size: 1.1rem;
-	font-weight: 700;
+.sync-cell__name {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-weight: 600;
 	color: var(--color-contrast);
 }
 
-.sync-block__title {
+.sync-cell__status {
+	font-size: 0.72rem;
+	color: var(--color-secondary);
+
+	.is-differs & {
+		color: var(--color-orange);
+	}
+	.is-client_only &,
+	.is-server_only & {
+		color: var(--color-brand);
+	}
+}
+
+.sync-cell__meta {
+	display: flex;
+	flex-direction: column;
+	font-size: 0.85rem;
+	color: var(--color-base);
+
+	small {
+		font-size: 0.7rem;
+		color: var(--color-secondary);
+	}
+
+	&.is-missing {
+		color: var(--color-secondary);
+		font-style: italic;
+	}
+}
+
+.sync-kind {
 	display: flex;
 	align-items: center;
 	gap: 0.4rem;
-	margin: 0 0 0.35rem;
-	font-size: 0.85rem;
-	font-weight: 600;
-	letter-spacing: 0.04em;
+	padding: 0.5rem 0.75rem 0.25rem;
+	border-top: 1px solid var(--color-divider);
+	font-size: 0.8rem;
+	font-weight: 700;
+	letter-spacing: 0.05em;
 	text-transform: uppercase;
 	color: var(--color-secondary);
 
@@ -374,74 +498,88 @@ defineExpose({ show })
 	}
 }
 
-.sync-empty {
-	margin: 0;
-	padding: 0.4rem 0.5rem;
-	font-size: 0.85rem;
-	color: var(--color-secondary);
-}
-
-.sync-list {
-	display: flex;
-	flex-direction: column;
-	gap: 0.15rem;
-}
-
-.sync-item {
+.sync-section {
 	display: flex;
 	align-items: center;
-	gap: 0.6rem;
-	padding: 0.35rem 0.5rem;
-	border-radius: var(--radius-md);
-	cursor: pointer;
-
-	&:hover {
-		background: var(--color-button-bg);
-	}
-
-	&.is-same {
-		opacity: 0.65;
-	}
+	justify-content: space-between;
+	gap: 0.5rem;
+	padding: 0.3rem 0.75rem;
+	background: var(--color-button-bg);
+	border-top: 1px solid var(--color-divider);
 }
 
-.sync-item__text {
+.sync-section__toggle {
 	display: flex;
 	flex: 1;
 	min-width: 0;
-	flex-direction: column;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--color-contrast);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
 }
 
-.sync-item__name {
-	font-weight: 600;
-	color: var(--color-contrast);
+.sync-section__chevron {
+	width: 1.1rem;
+	height: 1.1rem;
+	transition: transform 0.12s ease;
+
+	&.is-collapsed {
+		transform: rotate(-90deg);
+	}
+}
+
+.sync-section__name {
+	font-weight: 700;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.sync-item__sub {
+.sync-section__count {
 	font-size: 0.78rem;
 	color: var(--color-secondary);
 }
 
-.sync-item__tag {
-	flex-shrink: 0;
-	padding: 0.05rem 0.45rem;
-	border-radius: 9999px;
-	background: var(--color-button-bg);
-	color: var(--color-secondary);
-	font-size: 0.72rem;
-	font-weight: 600;
-	white-space: nowrap;
+.sync-section__actions {
+	display: flex;
+	gap: 0.35rem;
 
-	&.is-new {
-		background: var(--color-brand-highlight);
-		color: var(--color-brand);
+	button {
+		padding: 0.1rem 0.5rem;
+		border: 1px solid var(--color-button-border);
+		border-radius: 9999px;
+		background: transparent;
+		color: var(--color-secondary);
+		font: inherit;
+		font-size: 0.75rem;
+		cursor: pointer;
+
+		&:hover {
+			color: var(--color-contrast);
+			border-color: var(--color-brand);
+		}
 	}
+}
 
-	&.is-changed {
-		background: color-mix(in srgb, var(--color-orange) 18%, transparent);
-		color: var(--color-orange);
+.sync-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	padding: 0.2rem 0.6rem;
+	border-radius: 9999px;
+	background: var(--color-brand-highlight);
+	color: var(--color-brand);
+	font-size: 0.85rem;
+	font-weight: 600;
+
+	svg {
+		width: 1rem;
+		height: 1rem;
 	}
 }
 </style>

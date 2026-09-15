@@ -63,11 +63,11 @@ pub async fn terrarium_promote_release(
 
 #[tauri::command]
 pub async fn terrarium_sync_preview(
-    source_instance_id: String,
-    target_instance_id: String,
+    client_instance_id: String,
+    server_instance_id: String,
 ) -> Result<SyncPreview> {
     Ok(
-        terrarium_sync::sync_preview(source_instance_id, target_instance_id)
+        terrarium_sync::sync_preview(client_instance_id, server_instance_id)
             .await?,
     )
 }
