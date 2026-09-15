@@ -99,3 +99,4 @@ packages/tooling-config/script-utils/import-sort.js
 # Terrarium dev
 tauri-dev.log
 scripts/dev/*.png
+release-build.log
