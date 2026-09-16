@@ -752,10 +752,10 @@ onMounted(async () => {
 						<PackageOpenIcon />
 						{{ isServer ? formatMessage(messages.modsServer) : formatMessage(messages.mods) }}
 					</Button>
-					<!-- Публікацію з лаунчера поки сховано: релізи збірки закидаються руками.
-					     Код лишається — повернути: прибрати `false &&`. -->
+					<!-- Публікація — лише для клієнтської збірки: серверна на сервер із GitHub
+					     не підтягується, тож кнопка там лише вводила б в оману. -->
 					<Button
-						v-if="false && isAdmin && installed"
+						v-if="isAdmin && installed && !isServer"
 						v-tooltip="playing ? formatMessage(messages.publishWhilePlaying) : undefined"
 						size="xl"
 						:type="isServer && !updateAvailable ? 'colored' : 'base'"
