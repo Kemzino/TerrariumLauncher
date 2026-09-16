@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import {
 	ArrowLeftIcon,
-	ArrowRightIcon,
 	ChevronDownIcon,
 	FolderIcon,
 	SettingsIcon,
@@ -367,7 +366,8 @@ defineExpose({ show })
 						<ArrowLeftIcon /> {{ formatMessage(messages.toClient, { count: toClientCount }) }}
 					</span>
 					<span v-if="toServerCount" class="sync-pill">
-						{{ formatMessage(messages.toServer, { count: toServerCount }) }} <ArrowRightIcon />
+						{{ formatMessage(messages.toServer, { count: toServerCount }) }}
+						<ArrowLeftIcon class="rotate-180" />
 					</span>
 					<Button
 						type="colored"
