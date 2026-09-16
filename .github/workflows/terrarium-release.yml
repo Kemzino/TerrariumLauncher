@@ -126,14 +126,20 @@ jobs:
       - name: Setup pnpm
         run: corepack enable
 
-      - name: Cache pnpm store
+      # node_modules цілком, а не лише store: pnpm install зі store все одно
+      # займав ~70 с на лінкування; з готовими node_modules — секунди
+      - name: Cache node_modules
+        id: node-modules-cache
         uses: actions/cache@v4
         with:
-          path: ~/AppData/Local/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install dependencies
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Prepare app-lib .env

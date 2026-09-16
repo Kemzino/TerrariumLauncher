@@ -307,7 +307,9 @@ opt-level = 3
 [profile.release]
 opt-level = "s"  # Optimize for binary size
 strip = true  # Remove debug symbols
-lto = true  # Enables link to optimizations
+# Terrarium: thin замість fat LTO — fat займав ~10 хв лінкування на CI-раннері
+# (16 хв tauri build при повному кеші залежностей); бінарник більший на ~5 %
+lto = "thin"
 panic = "abort"  # Strip expensive panic clean-up logic
 
 # Specific profile for labrinth production builds
