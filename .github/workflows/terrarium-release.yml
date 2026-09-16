@@ -6,6 +6,9 @@ name: Terrarium Launcher release
 #  2. Запушити тег vX.Y.Z вручну (версія у файлах уже має збігатися з тегом).
 #  3. Run workflow з полем tag = існуючий тег — лише перезібрати/дозбирати реліз (без бампа).
 #
+# Платформи: Windows x64 (NSIS) і macOS universal (Intel + Apple Silicon, .dmg + .app.tar.gz
+# для оновлювача). Обидві збірки йдуть паралельно, реліз створює окрема джоба.
+#
 # Потрібен секрет TAURI_SIGNING_PRIVATE_KEY — вміст ~/.tauri/terrarium-launcher.key
 # (і TAURI_SIGNING_PRIVATE_KEY_PASSWORD, якщо ключ із паролем). Див. docs-terrarium/RELEASE.md.
 
@@ -79,11 +82,26 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
   build:
-    name: Зібрати й опублікувати (Windows x64)
+    name: Зібрати (${{ matrix.name }})
     needs: [tag]
     # needs.tag пропускається при пуші тега або при inputs.tag — тоді збираємо одразу
     if: always() && (github.event_name == 'push' || inputs.tag != '' || needs.tag.result == 'success')
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            bundles: nsis
+            target: ''
+            rust-target: ''
+          - name: macOS universal
+            os: macos-latest
+            bundles: app,dmg
+            target: universal-apple-darwin
+            # раннер — Apple Silicon; для universal потрібен ще Intel-таргет
+            rust-target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
     env:
       TAG: ${{ needs.tag.outputs.tag || inputs.tag || github.ref_name }}
       SQLX_OFFLINE: 'true'
@@ -92,7 +110,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG }}
-          fetch-depth: 0
 
       - name: Verify version matches tag and signing key is configured
         shell: bash
@@ -116,6 +133,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           rustflags: ''
+          target: ${{ matrix.rust-target }}
           cache-key: terrarium-release
 
       - name: Setup Node
@@ -156,22 +174,29 @@ jobs:
       # NSIS і nsis_tauri_utils tauri качає з GitHub Releases у %LOCALAPPDATA%/tauri — кешуємо,
       # бо ці завантаження періодично падають з 5xx
       - name: Cache Tauri bundler tools
+        if: runner.os == 'Windows'
         uses: actions/cache@v4
         with:
           path: ~/AppData/Local/tauri
           key: tauri-tools-${{ runner.os }}-nsis3
 
-      - name: Build installer (updater + minisign)
+      - name: Build app (updater + minisign)
         shell: bash
         working-directory: apps/app
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # create-dmg на CI без цього чекає на GUI
+          TAURI_BUNDLER_DMG_IGNORE_CI: 'true'
+          TARGET: ${{ matrix.target }}
+          BUNDLES: ${{ matrix.bundles }}
         run: |
+          args=(build --ci --config tauri-release.conf.json --config tauri.local-release.conf.json --bundles "$BUNDLES")
+          if [ -n "$TARGET" ]; then args+=(--target "$TARGET"); fi
           # Повтор на випадок тимчасових помилок завантаження інструментів бандлера;
           # cargo уже зібрано, тож повтор коштує секунди
           for attempt in 1 2 3; do
-            if pnpm exec tauri build --ci --config tauri-release.conf.json --config tauri.local-release.conf.json --bundles nsis; then
+            if pnpm exec tauri "${args[@]}"; then
               exit 0
             fi
             echo "::warning::tauri build впав (спроба $attempt/3), повтор за 30 с"
@@ -179,24 +204,68 @@ jobs:
           done
           exit 1
 
+      # Імена без пробілів: GitHub перейменовує асети, а URL у latest.json має бути передбачуваним
       - name: Collect release assets
         shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          BUNDLE="target/release/bundle/nsis"
-          SETUP=$(ls "$BUNDLE"/*_"${VERSION}"_x64-setup.exe)
-          test -f "$SETUP.sig" || { echo "::error::Немає $SETUP.sig — збірка без ключа підпису?"; exit 1; }
           mkdir -p dist-release
-          # Імена без пробілів: GitHub перейменовує асети, а URL у latest.json має бути передбачуваним
-          ASSET="Terrarium-Launcher_${VERSION}_x64-setup.exe"
-          cp "$SETUP" "dist-release/$ASSET"
-          cp "$SETUP.sig" "dist-release/$ASSET.sig"
-          echo "ASSET=$ASSET" >> "$GITHUB_ENV"
+          if [ -n "$TARGET" ]; then BUNDLE="target/$TARGET/release/bundle"; else BUNDLE="target/release/bundle"; fi
+          case "$RUNNER_OS" in
+            Windows)
+              SETUP=$(ls "$BUNDLE"/nsis/*_"${VERSION}"_x64-setup.exe)
+              test -f "$SETUP.sig" || { echo "::error::Немає $SETUP.sig — збірка без ключа підпису?"; exit 1; }
+              cp "$SETUP" "dist-release/Terrarium-Launcher_${VERSION}_x64-setup.exe"
+              cp "$SETUP.sig" "dist-release/Terrarium-Launcher_${VERSION}_x64-setup.exe.sig"
+              ;;
+            macOS)
+              APP_TGZ=$(ls "$BUNDLE"/macos/*.app.tar.gz)
+              test -f "$APP_TGZ.sig" || { echo "::error::Немає $APP_TGZ.sig — збірка без ключа підпису?"; exit 1; }
+              DMG=$(ls "$BUNDLE"/dmg/*.dmg)
+              cp "$APP_TGZ" "dist-release/Terrarium-Launcher_${VERSION}_macos.app.tar.gz"
+              cp "$APP_TGZ.sig" "dist-release/Terrarium-Launcher_${VERSION}_macos.app.tar.gz.sig"
+              cp "$DMG" "dist-release/Terrarium-Launcher_${VERSION}_universal.dmg"
+              ;;
+          esac
+          ls -la dist-release
+
+      - name: Upload assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: assets-${{ runner.os }}
+          path: dist-release/
+          if-no-files-found: error
+          retention-days: 3
+
+  release:
+    name: Опублікувати реліз
+    needs: [tag, build]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.tag.outputs.tag || inputs.tag || github.ref_name }}
+    steps:
+      - name: Check out tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+
+      - name: Download assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: assets-*
+          path: dist-release
+          merge-multiple: true
 
       - name: Write release notes
         shell: bash
         run: |
           set -euo pipefail
+          VERSION="${TAG#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           PREV=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
           {
             echo "## Terrarium Launcher ${VERSION}"
@@ -209,24 +278,37 @@ jobs:
               echo "Перший реліз."
             fi
             echo
-            echo "> Інсталятор без сертифіката Authenticode — SmartScreen може попередити при першому запуску: «Докладніше» → «Виконати в будь-якому разі». Встановлені лаунчери оновлюються автоматично."
+            echo "### Встановлення"
+            echo
+            echo "- **Windows**: \`Terrarium-Launcher_${VERSION}_x64-setup.exe\`. Інсталятор без сертифіката Authenticode — SmartScreen може попередити: «Докладніше» → «Виконати в будь-якому разі»."
+            echo "- **macOS** (Intel і Apple Silicon): \`Terrarium-Launcher_${VERSION}_universal.dmg\`. Застосунок не нотаризований Apple — при першому запуску натисни правою кнопкою → «Відкрити», або в терміналі: \`xattr -cr \"/Applications/Terrarium Launcher.app\"\`."
+            echo
+            echo "Встановлені лаунчери оновлюються автоматично."
           } > dist-release/release-notes.md
           cat dist-release/release-notes.md
 
+      # https://tauri.app/plugin/updater/#server-support — один universal .app.tar.gz на обидві macOS-архітектури
       - name: Generate latest.json (Tauri updater manifest)
         shell: bash
         run: |
           set -euo pipefail
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
           jq -n \
             --arg version "$VERSION" \
             --rawfile notes dist-release/release-notes.md \
-            --rawfile sig "dist-release/$ASSET.sig" \
-            --arg url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ASSET}" \
+            --rawfile win_sig "dist-release/Terrarium-Launcher_${VERSION}_x64-setup.exe.sig" \
+            --rawfile mac_sig "dist-release/Terrarium-Launcher_${VERSION}_macos.app.tar.gz.sig" \
+            --arg win_url "${BASE}/Terrarium-Launcher_${VERSION}_x64-setup.exe" \
+            --arg mac_url "${BASE}/Terrarium-Launcher_${VERSION}_macos.app.tar.gz" \
             '{
               version: $version,
               notes: $notes,
               pub_date: (now | todateiso8601),
-              platforms: { "windows-x86_64": { signature: ($sig | rtrimstr("\n")), url: $url } }
+              platforms: {
+                "windows-x86_64": { signature: ($win_sig | rtrimstr("\n")), url: $win_url },
+                "darwin-aarch64": { signature: ($mac_sig | rtrimstr("\n")), url: $mac_url },
+                "darwin-x86_64":  { signature: ($mac_sig | rtrimstr("\n")), url: $mac_url }
+              }
             }' > dist-release/latest.json
           cat dist-release/latest.json
 
@@ -239,7 +321,10 @@ jobs:
             --verify-tag \
             --title "Terrarium Launcher ${VERSION}" \
             --notes-file dist-release/release-notes.md \
-            "dist-release/$ASSET" \
-            "dist-release/$ASSET.sig" \
+            "dist-release/Terrarium-Launcher_${VERSION}_x64-setup.exe" \
+            "dist-release/Terrarium-Launcher_${VERSION}_x64-setup.exe.sig" \
+            "dist-release/Terrarium-Launcher_${VERSION}_universal.dmg" \
+            "dist-release/Terrarium-Launcher_${VERSION}_macos.app.tar.gz" \
+            "dist-release/Terrarium-Launcher_${VERSION}_macos.app.tar.gz.sig" \
             dist-release/latest.json
           echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"

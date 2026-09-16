@@ -64,9 +64,22 @@
 Поставити попередню версію, запустити — за кілька секунд має з'явитись попап "Update available".
 Лог: `%APPDATA%\TerrariumLauncher\launcher_logs\`.
 
+## Платформи
+
+| Платформа                               | Асети релізу                                                                                                      | Оновлювач       |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------- |
+| Windows x64                             | `Terrarium-Launcher_X_x64-setup.exe` + `.sig`                                                                     | NSIS, `passive` |
+| macOS universal (Intel + Apple Silicon) | `Terrarium-Launcher_X_universal.dmg` (встановлення), `Terrarium-Launcher_X_macos.app.tar.gz` + `.sig` (оновлення) | замінює `.app`  |
+| Linux                                   | — (план: `docs-terrarium/PLAN-unix.md`)                                                                           | —               |
+
+`latest.json` містить `windows-x86_64`, `darwin-aarch64`, `darwin-x86_64` (обидва macOS-ключі → один universal архів).
+Windows і macOS збираються паралельно в матриці; реліз створює окрема джоба, коли обидві збірки готові.
+
 ## Обмеження
 
-- Лише Windows x64. Для macOS/Linux треба додати відповідні платформи в `latest.json`
-  і зібрати їх на відповідних машинах (див. `.github/workflows/theseus-release.yml` як приклад).
-- Інсталятор не має code-signing сертифіката → SmartScreen попереджає при першому запуску.
-  Оновлення це не блокує (updater перевіряє minisign, не Authenticode).
+- Windows: інсталятор без сертифіката Authenticode → SmartScreen попереджає при першому запуску.
+- macOS: збірка підписана ad-hoc (`signingIdentity: "-"` у `tauri-release.conf.json`), без нотаризації Apple →
+  Gatekeeper попереджає при першому запуску (ПКМ → «Відкрити» або `xattr -cr`). Оновлювач працює, але після
+  оновлення попередження повторюється. Прибрати — Apple Developer Program ($99/рік) + нотаризація.
+- Оновлення жодної платформи це не блокує: updater перевіряє minisign-підпис, не сертифікат ОС.
+- Локальний `scripts/terrarium-release.ps1` збирає лише Windows.
