@@ -119,7 +119,8 @@ function relative(iso: string) {
 function renderContent(text: string) {
 	const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 	return escaped
-		.replace(/&lt;@[!&]?\d+&gt;/g, '@учасник')
+		.replace(/&lt;@&amp;\d+&gt;/g, '@роль')
+		.replace(/&lt;@!?\d+&gt;/g, '@учасник')
 		.replace(/&lt;#\d+&gt;/g, '#канал')
 		.replace(/&lt;a?:(\w+):\d+&gt;/g, ':$1:')
 		.replace(/```([\s\S]*?)```/g, '<pre>$1</pre>')
