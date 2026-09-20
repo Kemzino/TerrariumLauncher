@@ -11,6 +11,10 @@ export const TERRARIUM_LINKS = {
 /** Адреса ігрового сервера (SRV → порт резолвиться так само, як у грі). */
 export const TERRARIUM_SERVER_ADDRESS = 'create.terrariumworlds.fun'
 
+/** Стрічка новин: JSON, який GitHub Actions збирає з Discord (репо TerrariumNews). */
+export const TERRARIUM_NEWS_URL =
+	'https://raw.githubusercontent.com/Kemzino/TerrariumNews/main/news.json'
+
 export function openTerrariumLink(key: keyof typeof TERRARIUM_LINKS) {
 	void openUrl(TERRARIUM_LINKS[key])
 }
