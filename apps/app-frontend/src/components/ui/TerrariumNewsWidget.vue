@@ -8,6 +8,7 @@ import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
+import TerrariumLightbox, { type LightboxImage } from '@/components/ui/TerrariumLightbox.vue'
 import { openTerrariumLink, TERRARIUM_NEWS_URL } from '@/helpers/terrarium-links'
 
 dayjs.extend(relativeTime)
@@ -142,6 +143,30 @@ function isImage(a: NewsAttachment) {
 	return !!a.content_type?.startsWith('image/')
 }
 
+const lightbox = ref<InstanceType<typeof TerrariumLightbox> | null>(null)
+
+/** Усі фото повідомлення (вкладення + картинки ембедів) — гортаються в лайтбоксі разом. */
+function imagesOf(item: NewsMessage): LightboxImage[] {
+	const caption = item.content ? `${item.author}: ${item.content.slice(0, 200)}` : item.author
+	return [
+		...item.attachments.filter(isImage).map((a) => ({ url: a.url, name: a.name, caption })),
+		...item.embeds
+			.filter((e) => e.image)
+			.map((e) => ({ url: e.image!, name: e.title ?? undefined, caption })),
+	]
+}
+
+function openImage(item: NewsMessage, url: string) {
+	const list = imagesOf(item)
+	lightbox.value?.show(
+		list,
+		Math.max(
+			0,
+			list.findIndex((i) => i.url === url),
+		),
+	)
+}
+
 // Посилання в тексті відкриваємо в системному браузері, а не всередині вебв'ю
 function onContentClick(event: MouseEvent) {
 	const link = (event.target as HTMLElement).closest('a')
@@ -250,9 +275,20 @@ onBeforeUnmount(() => {
 						>
 							<strong v-if="embed.title">{{ embed.title }}</strong>
 							<span v-if="embed.description">{{ embed.description }}</span>
-							<img v-if="embed.image" :src="embed.image" alt="" loading="lazy" />
+							<img
+								v-if="embed.image"
+								:src="embed.image"
+								alt=""
+								loading="lazy"
+								class="terrarium-news__embed-image"
+								@click="openImage(item, embed.image)"
+							/>
 						</div>
-						<div v-if="item.attachments.length" class="terrarium-news__attachments">
+						<div
+							v-if="item.attachments.length"
+							class="terrarium-news__attachments"
+							:class="{ 'is-grid': item.attachments.filter(isImage).length > 1 }"
+						>
 							<template v-for="a in item.attachments" :key="a.url">
 								<img
 									v-if="isImage(a)"
@@ -260,7 +296,7 @@ onBeforeUnmount(() => {
 									:alt="a.name"
 									loading="lazy"
 									class="terrarium-news__image"
-									@click="openUrl(a.url)"
+									@click="openImage(item, a.url)"
 								/>
 								<button v-else type="button" class="terrarium-news__file" @click="openUrl(a.url)">
 									<ExternalIcon /> {{ formatMessage(messages.attachment, { name: a.name }) }}
@@ -281,6 +317,7 @@ onBeforeUnmount(() => {
 				</Button>
 			</div>
 		</div>
+		<TerrariumLightbox ref="lightbox" />
 	</section>
 </template>
 
@@ -424,13 +461,32 @@ onBeforeUnmount(() => {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 0.4rem;
+
+	// Кілька фото — квадратні мініатюри у два стовпці, одне — на всю ширину
+	&.is-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+
+		.terrarium-news__image {
+			width: 100%;
+			aspect-ratio: 1;
+			max-height: none;
+			object-fit: cover;
+		}
+	}
 }
 
-.terrarium-news__image {
+.terrarium-news__image,
+.terrarium-news__embed-image {
 	max-width: 100%;
 	max-height: 12rem;
 	border-radius: var(--radius-md);
 	cursor: zoom-in;
+	transition: filter 0.12s ease;
+
+	&:hover {
+		filter: brightness(1.1);
+	}
 }
 
 .terrarium-news__file {
