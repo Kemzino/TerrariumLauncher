@@ -55,11 +55,12 @@ pub(crate) use self::shared_instance::{
 };
 
 pub(crate) mod mod_groups;
-pub use self::mod_groups::{ContentGroup, FlattenReason, flat_path, group_of};
+pub use self::mod_groups::{
+    ContentGroup, flat_path, group_of,
+};
 pub(crate) use self::mod_groups::{
-    apply_pack_groups, create_mod_group, delete_mod_group, flatten_mods,
-    FLATTEN_FILE, MODS_FOLDER, PACK_GROUPS_FILE, README_FILE,
-    flatten_for_pack_update, flatten_reason, grouped_path, is_group_dir_name,
-    list_mod_groups, rename_mod_group,
-    restore_after_pack_update, restore_mods, set_mod_group,
+    FLATTEN_FILE, MODS_FOLDER, PACK_GROUPS_FILE, README_FILE, apply_pack_groups,
+    create_mod_group, delete_mod_group, flatten_for_pack_update, flatten_reason,
+    grouped_path, is_group_dir_name, list_mod_groups, rename_mod_group,
+    restore_after_pack_update, set_mod_group, set_mod_group_enabled,
 };

@@ -358,6 +358,7 @@ fn main() {
                         "terrarium_rename_mod_group",
                         "terrarium_delete_mod_group",
                         "terrarium_set_mod_group",
+                        "terrarium_set_mod_group_enabled",
                         "terrarium_promote_release",
                         "terrarium_sync_preview",
                         "terrarium_sync_apply",

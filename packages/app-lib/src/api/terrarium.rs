@@ -1347,6 +1347,20 @@ pub async fn delete_mod_group(
     Ok(())
 }
 
+/// Увімкнути/вимкнути групу цілком (папка `Група` ↔ `Група.disabled`).
+#[tracing::instrument]
+pub async fn set_mod_group_enabled(
+    instance_id: String,
+    name: String,
+    enabled: bool,
+) -> crate::Result<()> {
+    let state = State::get().await?;
+    commands::set_mod_group_enabled(&instance_id, &name, enabled, &state)
+        .await?;
+    crate::state::sync_content_files(&instance_id, &state).await?;
+    Ok(())
+}
+
 /// Перемістити моди в групу (`None` — прибрати з групи). Повертає нові шляхи.
 #[tracing::instrument]
 pub async fn set_mod_group(

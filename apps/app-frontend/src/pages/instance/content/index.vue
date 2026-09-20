@@ -119,10 +119,10 @@ import {
 	versionChangesGameVersion,
 } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { useSessionStorage } from '@vueuse/core'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openUrl } from '@tauri-apps/plugin-opener'
+import { useSessionStorage } from '@vueuse/core'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -159,6 +159,7 @@ import {
 	terrarium_list_mod_groups,
 	terrarium_rename_mod_group,
 	terrarium_set_mod_group,
+	terrarium_set_mod_group_enabled,
 } from '@/helpers/terrarium'
 import type { CacheBehaviour } from '@/helpers/types'
 import { highlightModInInstance } from '@/helpers/utils.js'
@@ -1540,11 +1541,13 @@ const packActions = useSyncedPackActions(instance, syncedContentModal, canMutate
 
 // Terrarium: групи модів — підпапки mods/<Група>/ (акордеони в списку)
 const modGroupNames = ref<string[]>([])
+const disabledModGroups = ref<string[]>([])
 
 async function refreshModGroups() {
 	if (!instance.value) return
 	const groups = await terrarium_list_mod_groups(instance.value.id).catch(() => [])
 	modGroupNames.value = groups.map((group) => group.name)
+	disabledModGroups.value = groups.filter((group) => !group.enabled).map((group) => group.name)
 }
 
 async function afterModGroupChange() {
@@ -1558,7 +1561,16 @@ const managedGroupOf = (item: ContentItem) => modGroupOf(item.file_path)
 
 const modGroups = {
 	groups: modGroupNames,
+	disabledGroups: disabledModGroups,
 	groupOf: managedGroupOf,
+	setEnabled: async (name: string, enabled: boolean) => {
+		try {
+			await terrarium_set_mod_group_enabled(instance.value.id, name, enabled)
+		} catch (error) {
+			handleError(error)
+		}
+		await afterModGroupChange()
+	},
 	canGroup: (item: ContentItem) =>
 		item.project_type === 'mod' && !!item.file_path && canMutateContent(item),
 	create: async (name: string) => {

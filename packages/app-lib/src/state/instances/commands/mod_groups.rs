@@ -1,11 +1,14 @@
 //! Terrarium: групи модів як справжні підпапки `mods/<Група>/`.
 //!
 //! Структура лежить на диску (щоб її бачив і той, хто просто скопіює папку в
-//! інший лаунчер — там же лежить README.txt із поясненням), але завантажувачі
-//! Minecraft підпапок не читають. Тому на час гри jar-и переносяться в корінь
-//! `mods/`, карта «файл → група» пишеться в `mods/.terrarium-flatten.json`, а
-//! після виходу з гри все повертається на місця. Поки карта існує, сканер
-//! показує файли з кореня під їхніми груповими шляхами — БД не смикається.
+//! інший лаунчер — там же лежить README.txt із поясненням). Підпапки в грі
+//! читає мод зі складу збірки, тож на час запуску нічого не переноситься.
+//! Вимкнена група — папка `mods/<Група>.disabled/`: мод (як і завантажувачі)
+//! її ігнорує, а лаунчер показує групу як «вимкнену».
+//!
+//! Карта розкладання `mods/.terrarium-flatten.json` лишилась лише для
+//! оновлення збірки (моди тимчасово в корені, щоб інсталятор зіставив шляхи з
+//! попереднім пакетом) і для самовідновлення після старих версій лаунчера.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -43,13 +46,24 @@ pub struct FlattenMap {
     pub files: BTreeMap<String, String>,
 }
 
+/// Суфікс папки вимкненої групи (той самий, що й у файлів модів).
+pub const DISABLED_SUFFIX: &str = ".disabled";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentGroup {
     pub name: String,
     pub files: usize,
+    /// `false` — папка `<Група>.disabled`, гра її не читає.
+    pub enabled: bool,
 }
 
-/// `mods/Група/x.jar` → `Some("Група")`; `mods/x.jar` → `None`.
+/// Назва групи з імені папки: `Група.disabled` → `Група`.
+pub fn group_name_of_dir(dir_name: &str) -> &str {
+    dir_name.strip_suffix(DISABLED_SUFFIX).unwrap_or(dir_name)
+}
+
+/// `mods/Група/x.jar` або `mods/Група.disabled/x.jar` → `Some("Група")`;
+/// `mods/x.jar` → `None`.
 pub fn group_of(relative_path: &str) -> Option<&str> {
     let mut parts = relative_path.split('/');
     if parts.next()? != MODS_FOLDER {
@@ -57,14 +71,17 @@ pub fn group_of(relative_path: &str) -> Option<&str> {
     }
     let group = parts.next()?;
     parts.next()?; // є третій сегмент — отже, другий був папкою
-    Some(group)
+    Some(group_name_of_dir(group))
 }
 
 /// `mods/Група/x.jar` → `mods/x.jar` (шлях, яким файл бачить гра та .mrpack).
 pub fn flat_path(relative_path: &str) -> String {
-    match group_of(relative_path) {
-        Some(group) => relative_path.replacen(&format!("/{group}/"), "/", 1),
-        None => relative_path.to_string(),
+    let mut parts = relative_path.splitn(3, '/');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(MODS_FOLDER), Some(_group_dir), Some(rest)) => {
+            format!("{MODS_FOLDER}/{rest}")
+        }
+        _ => relative_path.to_string(),
     }
 }
 
@@ -130,30 +147,29 @@ async fn write_flatten_map(
 // ---------------------------------------------------------------------------
 // README
 
-const README_TEXT: &str = "\
-Terrarium Launcher — групи модів / mod groups
+const README_TEXT: &str = "\nTerrarium Launcher — групи модів / mod groups
 =============================================
 
 Підпапки в цій теці (наприклад mods/Оптимізація/) — це групи модів, створені в
-Terrarium Launcher для зручності. Minecraft (NeoForge/Forge/Fabric) НЕ читає моди
-з підпапок: на час гри лаунчер сам переносить jar-файли в корінь mods/ і повертає
-їх назад після виходу з гри.
+Terrarium Launcher. Гра читає їх завдяки моду зі складу збірки Terrarium, тож
+переносити нічого не треба.
 
-Якщо копіюєш цю теку в інший лаунчер — перенеси всі .jar з підпапок прямо в mods/:
+Папка з суфіксом .disabled (наприклад mods/Шейдери.disabled/) — вимкнена група:
+гра її не читає, як і файли *.jar.disabled.
+
+Якщо копіюєш цю теку в інший лаунчер БЕЗ збірки Terrarium — перенеси всі .jar
+з підпапок прямо в mods/:
   Windows (PowerShell, у теці mods):
     Get-ChildItem -Directory | Get-ChildItem -Filter *.jar | Move-Item -Destination .
   Linux/macOS (у теці mods):
     find . -mindepth 2 -name '*.jar' -exec mv -t . {} +
 
-Файли .disabled — вимкнені моди, їх копіювати не треба.
-Службовий файл .terrarium-flatten.json існує лише поки гра запущена — не чіпай.
-
 ---
 
-Subfolders here are mod groups made by Terrarium Launcher. Minecraft mod loaders
-do not load mods from subfolders, so the launcher moves the jars into mods/ while
-the game runs and back afterwards. Copying this folder to another launcher?
-Move every .jar from the subfolders straight into mods/ (commands above).
+Subfolders here are mod groups made by Terrarium Launcher; a mod bundled with
+the Terrarium pack loads them in-game. A folder ending in .disabled is a
+disabled group. Copying this folder elsewhere without that mod? Move every .jar
+from the subfolders straight into mods/ (commands above).
 ";
 
 async fn ensure_readme(mods_dir: &Path) -> crate::Result<()> {
@@ -174,33 +190,121 @@ pub(crate) async fn list_mod_groups(
 ) -> crate::Result<Vec<ContentGroup>> {
     let scope = resolve_content_scope(instance_id, None, state).await?;
     let mods_dir = instance_full_path(state, &scope.instance).join(MODS_FOLDER);
-    let mut groups: BTreeMap<String, usize> = BTreeMap::new();
+    // назва → (файлів, увімкнена)
+    let mut groups: BTreeMap<String, (usize, bool)> = BTreeMap::new();
     if mods_dir.is_dir() {
         let mut dir = io::read_dir(&mods_dir).await?;
         while let Some(entry) = dir.next_entry().await.map_err(IOError::from)? {
             let Ok(name) = entry.file_name().into_string() else {
                 continue;
             };
-            if !is_group_dir_name(&name)
-                || !entry.path().is_dir()
-            {
+            if !is_group_dir_name(&name) || !entry.path().is_dir() {
                 continue;
             }
             let count = std::fs::read_dir(entry.path())
                 .map(|d| d.flatten().filter(|e| e.path().is_file()).count())
                 .unwrap_or(0);
-            groups.insert(name, count);
+            let enabled = !name.ends_with(DISABLED_SUFFIX);
+            let entry = groups
+                .entry(group_name_of_dir(&name).to_string())
+                .or_insert((0, enabled));
+            entry.0 += count;
+            // Якщо є і `Група`, і `Група.disabled` — вважаємо групу ввімкненою
+            entry.1 |= enabled;
         }
         if let Some(map) = read_flatten_map_sync(&mods_dir) {
             for group in map.files.values() {
-                *groups.entry(group.clone()).or_default() += 1;
+                groups.entry(group.clone()).or_insert((0, true)).0 += 1;
             }
         }
     }
     Ok(groups
         .into_iter()
-        .map(|(name, files)| ContentGroup { name, files })
+        .map(|(name, (files, enabled))| ContentGroup {
+            name,
+            files,
+            enabled,
+        })
         .collect())
+}
+
+/// Папка групи на диску: `Група` або `Група.disabled` — що є.
+fn group_dir(mods_dir: &Path, name: &str) -> PathBuf {
+    let enabled = mods_dir.join(name);
+    if enabled.is_dir() {
+        return enabled;
+    }
+    let disabled = mods_dir.join(format!("{name}{DISABLED_SUFFIX}"));
+    if disabled.is_dir() { disabled } else { enabled }
+}
+
+/// Увімкнути/вимкнути групу цілком: перейменувати папку `Група` ↔
+/// `Група.disabled` і оновити шляхи файлів у БД.
+pub(crate) async fn set_mod_group_enabled(
+    instance_id: &str,
+    name: &str,
+    enabled: bool,
+    state: &State,
+) -> crate::Result<()> {
+    let _content_lock = state.lock_instance_content(instance_id).await;
+    let scope = resolve_content_scope(instance_id, None, state).await?;
+    let mods_dir = instance_full_path(state, &scope.instance).join(MODS_FOLDER);
+    if instance_has_running_process(instance_id, state).await? {
+        return Err(crate::ErrorKind::OtherError(
+            "Закрий гру, щоб увімкнути чи вимкнути групу".to_string(),
+        )
+        .into());
+    }
+    let current = group_dir(&mods_dir, name);
+    let Some(current_name) = current.file_name().and_then(|n| n.to_str())
+    else {
+        return Ok(());
+    };
+    let target_name = if enabled {
+        name.to_string()
+    } else {
+        format!("{name}{DISABLED_SUFFIX}")
+    };
+    if current_name == target_name {
+        return Ok(());
+    }
+    if !current.is_dir() {
+        return Err(
+            crate::ErrorKind::FSError(format!("Групи «{name}» немає")).into()
+        );
+    }
+    let target = mods_dir.join(&target_name);
+    if target.exists() {
+        return Err(crate::ErrorKind::FSError(format!(
+            "Папка «{target_name}» уже існує"
+        ))
+        .into());
+    }
+    io::rename_or_move(&current, &target).await?;
+
+    let old_prefix = format!("{MODS_FOLDER}/{current_name}/");
+    let files =
+        content_rows::get_instance_files(&scope.instance.id, &state.pool)
+            .await?;
+    let mut tx = state.pool.begin().await?;
+    for file in files
+        .iter()
+        .filter(|f| f.relative_path.starts_with(&old_prefix))
+    {
+        let new_path =
+            format!("{MODS_FOLDER}/{target_name}/{}", file.file_name);
+        content_rows::rename_instance_file(
+            &scope.instance.id,
+            &file.relative_path,
+            &new_path,
+            &file.file_name,
+            file.enabled,
+            &mut tx,
+        )
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -249,11 +353,20 @@ pub(crate) async fn set_mod_group(
             crate::ErrorKind::InputError(format!("Bad path {project_path}"))
         })?
         .to_string();
-    let new_path = grouped_path(group.as_deref(), &file_name);
+    // Переміщення у вимкнену групу — за фактичною папкою `Група.disabled`
+    let mods_dir = base.join(MODS_FOLDER);
+    let group_dir_name = group.as_deref().map(|g| {
+        let disabled = format!("{g}{DISABLED_SUFFIX}");
+        if !mods_dir.join(g).is_dir() && mods_dir.join(&disabled).is_dir() {
+            disabled
+        } else {
+            g.to_string()
+        }
+    });
+    let new_path = grouped_path(group_dir_name.as_deref(), &file_name);
     if new_path == project_path {
         return Ok(new_path);
     }
-    let mods_dir = base.join(MODS_FOLDER);
     if !base.join(project_path).exists() {
         return Err(crate::ErrorKind::FSError(format!(
             "Файл {project_path} не знайдено"
@@ -266,7 +379,7 @@ pub(crate) async fn set_mod_group(
         ))
         .into());
     }
-    if let Some(group) = &group {
+    if let Some(group) = &group_dir_name {
         io::create_dir_all(mods_dir.join(group)).await?;
     }
     io::rename_or_move(base.join(project_path), base.join(&new_path)).await?;
@@ -306,7 +419,21 @@ pub(crate) async fn rename_mod_group(
         )
         .into());
     }
-    if mods_dir.join(&new_name).exists() {
+    if mods_dir
+        .join(format!("{old_name}{DISABLED_SUFFIX}"))
+        .is_dir()
+        && !mods_dir.join(old_name).is_dir()
+    {
+        return Err(crate::ErrorKind::OtherError(
+            "Група вимкнена — спершу увімкни її".to_string(),
+        )
+        .into());
+    }
+    if mods_dir.join(&new_name).exists()
+        || mods_dir
+            .join(format!("{new_name}{DISABLED_SUFFIX}"))
+            .exists()
+    {
         return Err(crate::ErrorKind::FSError(format!(
             "Група «{new_name}» уже існує"
         ))
@@ -320,7 +447,9 @@ pub(crate) async fn rename_mod_group(
         content_rows::get_instance_files(&scope.instance.id, &state.pool)
             .await?;
     let mut tx = state.pool.begin().await?;
-    for file in files.iter().filter(|f| f.relative_path.starts_with(&old_prefix))
+    for file in files
+        .iter()
+        .filter(|f| f.relative_path.starts_with(&old_prefix))
     {
         let new_path = grouped_path(Some(&new_name), &file.file_name);
         content_rows::rename_instance_file(
@@ -347,7 +476,7 @@ pub(crate) async fn delete_mod_group(
     let scope = resolve_content_scope(instance_id, None, state).await?;
     let base = instance_full_path(state, &scope.instance);
     let mods_dir = base.join(MODS_FOLDER);
-    let group_dir = mods_dir.join(name);
+    let group_dir = self::group_dir(&mods_dir, name);
     if instance_has_running_process(instance_id, state).await? {
         return Err(crate::ErrorKind::OtherError(
             "Закрий гру, щоб видалити групу".to_string(),
@@ -357,7 +486,12 @@ pub(crate) async fn delete_mod_group(
     if !group_dir.is_dir() {
         return Ok(());
     }
-    let prefix = format!("{MODS_FOLDER}/{name}/");
+    let dir_name = group_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(name)
+        .to_string();
+    let prefix = format!("{MODS_FOLDER}/{dir_name}/");
     let files =
         content_rows::get_instance_files(&scope.instance.id, &state.pool)
             .await?;
@@ -394,53 +528,7 @@ pub(crate) async fn delete_mod_group(
 }
 
 // ---------------------------------------------------------------------------
-// Розкладання на час гри / оновлення збірки
-
-/// На час гри: перенести всі jar-и з груп у корінь `mods/` і запам'ятати,
-/// звідки вони. БД не чіпаємо — сканер показує файли з кореня під груповими
-/// шляхами, поки існує карта. Ідемпотентно: якщо карта вже є — доповнює її.
-pub(crate) async fn flatten_mods(
-    instance_dir: &Path,
-    reason: FlattenReason,
-) -> crate::Result<()> {
-    let mods_dir = instance_dir.join(MODS_FOLDER);
-    if !mods_dir.is_dir() {
-        return Ok(());
-    }
-    let mut map = read_flatten_map_sync(&mods_dir).unwrap_or_default();
-    map.reason = Some(reason);
-    let mut dir = io::read_dir(&mods_dir).await?;
-    while let Some(entry) = dir.next_entry().await.map_err(IOError::from)? {
-        let Ok(group) = entry.file_name().into_string() else {
-            continue;
-        };
-        if !is_group_dir_name(&group) || !entry.path().is_dir() {
-            continue;
-        }
-        let mut files = io::read_dir(entry.path()).await?;
-        while let Some(file) =
-            files.next_entry().await.map_err(IOError::from)?
-        {
-            let Ok(file_name) = file.file_name().into_string() else {
-                continue;
-            };
-            if !file.path().is_file() {
-                continue;
-            }
-            let target = mods_dir.join(&file_name);
-            if target.exists() {
-                tracing::warn!(
-                    "Terrarium: {file_name} є і в корені mods/, і в групі «{group}» — лишаю в групі"
-                );
-                continue;
-            }
-            io::rename_or_move(file.path(), &target).await?;
-            map.files.insert(file_name, group.clone());
-        }
-    }
-    ensure_readme(&mods_dir).await?;
-    write_flatten_map(&mods_dir, &map).await
-}
+// Розкладання на час оновлення збірки (і самовідновлення після старих версій)
 
 /// Повернути файли з кореня в їхні групи за картою. Те, чого вже нема
 /// (мод видалили/оновили під час гри), просто забувається.
@@ -642,7 +730,9 @@ mod tests {
         std::fs::write(mods.join("root.jar"), b"r").unwrap();
         std::fs::write(mods.join(".hidden/h.jar"), b"h").unwrap();
 
-        flatten_mods(dir.path(), FlattenReason::Launch).await.unwrap();
+        flatten_mods(dir.path(), FlattenReason::Launch)
+            .await
+            .unwrap();
         assert!(mods.join("a.jar").is_file());
         assert!(mods.join("b.jar").is_file());
         assert!(mods.join("off.jar.disabled").is_file());

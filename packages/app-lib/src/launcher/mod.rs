@@ -1156,13 +1156,6 @@ pub async fn launch_minecraft(
         .update_status(Some(instance.name.clone()))
         .await;
 
-    // Terrarium: моди з груп `mods/<Група>/` — у корінь на час гри
-    crate::state::instances::commands::flatten_mods(
-        &state.directories.instances_dir().join(&instance.path),
-        crate::state::instances::commands::FlattenReason::Launch,
-    )
-    .await?;
-
     // Create Minecraft child by inserting it into the state
     // This also spawns the process and prepares the subsequent processes
     state

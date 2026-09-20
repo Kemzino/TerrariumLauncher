@@ -54,51 +54,57 @@ pub(crate) fn scan_content_files(
         }
 
         for (dir, group) in scan_targets {
-        for entry in std::fs::read_dir(&dir)
-            .map_err(|err| IOError::with_path(err, &dir))?
-        {
-            let path = entry.map_err(IOError::from)?.path();
-            if !path.is_file() {
-                continue;
+            for entry in std::fs::read_dir(&dir)
+                .map_err(|err| IOError::with_path(err, &dir))?
+            {
+                let path = entry.map_err(IOError::from)?.path();
+                if !path.is_file() {
+                    continue;
+                }
+
+                let Some(file_name) =
+                    path.file_name().and_then(|value| value.to_str())
+                else {
+                    continue;
+                };
+
+                if !is_scannable_project_file(project_type, file_name) {
+                    continue;
+                }
+
+                let metadata = path.metadata().map_err(IOError::from)?;
+                let size = metadata.len();
+                let modified_at_ns =
+                    file_modified_at_ns(&metadata).map_err(IOError::from)?;
+                // Папка групи як є (`Група` чи `Група.disabled`) — шлях у БД має
+                // збігатися з диском; назву групи звідси дістає `group_of`
+                let group = group.clone().or_else(|| {
+                    flatten_map
+                        .as_ref()
+                        .and_then(|m| m.files.get(file_name).cloned())
+                });
+                let relative_path = match &group {
+                    Some(group) => format!("{folder}/{group}/{file_name}"),
+                    None => format!("{folder}/{file_name}"),
+                };
+                let group_disabled = group
+                    .as_deref()
+                    .is_some_and(|g| g.ends_with(mod_groups::DISABLED_SUFFIX));
+                let hash_cache_key = file_hash_cache_key(
+                    size,
+                    modified_at_ns,
+                    &format!("{instance_path}/{relative_path}"),
+                );
+
+                files.push(ScannedContentFile {
+                    relative_path,
+                    file_name: file_name.to_string(),
+                    enabled: !file_name.ends_with(".disabled")
+                        && !group_disabled,
+                    size,
+                    hash_cache_key,
+                });
             }
-
-            let Some(file_name) =
-                path.file_name().and_then(|value| value.to_str())
-            else {
-                continue;
-            };
-
-            if !is_scannable_project_file(project_type, file_name) {
-                continue;
-            }
-
-            let metadata = path.metadata().map_err(IOError::from)?;
-            let size = metadata.len();
-            let modified_at_ns =
-                file_modified_at_ns(&metadata).map_err(IOError::from)?;
-            let group = group.clone().or_else(|| {
-                flatten_map
-                    .as_ref()
-                    .and_then(|m| m.files.get(file_name).cloned())
-            });
-            let relative_path = match &group {
-                Some(group) => format!("{folder}/{group}/{file_name}"),
-                None => format!("{folder}/{file_name}"),
-            };
-            let hash_cache_key = file_hash_cache_key(
-                size,
-                modified_at_ns,
-                &format!("{instance_path}/{relative_path}"),
-            );
-
-            files.push(ScannedContentFile {
-                relative_path,
-                file_name: file_name.to_string(),
-                enabled: !file_name.ends_with(".disabled"),
-                size,
-                hash_cache_key,
-            });
-        }
         }
     }
 

@@ -28,6 +28,7 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             terrarium_rename_mod_group,
             terrarium_delete_mod_group,
             terrarium_set_mod_group,
+            terrarium_set_mod_group_enabled,
             terrarium_promote_release,
             terrarium_sync_preview,
             terrarium_sync_apply,
@@ -58,6 +59,15 @@ pub async fn terrarium_fetch_latest_release(
         terrarium::fetch_latest_release(pack, channel.unwrap_or_default())
             .await?,
     )
+}
+
+#[tauri::command]
+pub async fn terrarium_set_mod_group_enabled(
+    instance_id: String,
+    name: String,
+    enabled: bool,
+) -> Result<()> {
+    Ok(terrarium::set_mod_group_enabled(instance_id, name, enabled).await?)
 }
 
 #[tauri::command]

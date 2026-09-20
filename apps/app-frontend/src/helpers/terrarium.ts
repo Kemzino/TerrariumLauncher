@@ -253,13 +253,16 @@ export async function terrarium_apply_pack_branding(instanceId: string) {
 export interface ContentGroup {
 	name: string
 	files: number
+	/** `false` — папка `<Група>.disabled`, гра її не читає */
+	enabled: boolean
 }
 
-/** `mods/Група/x.jar` → `Група`; інакше null */
+/** `mods/Група/x.jar` або `mods/Група.disabled/x.jar` → `Група`; інакше null */
 export function modGroupOf(filePath: string | undefined | null): string | null {
 	if (!filePath) return null
 	const parts = filePath.split('/')
-	return parts.length === 3 && parts[0] === 'mods' ? parts[1] : null
+	if (parts.length !== 3 || parts[0] !== 'mods') return null
+	return parts[1].endsWith('.disabled') ? parts[1].slice(0, -'.disabled'.length) : parts[1]
 }
 
 /** Перед оновленням збірки в наявний примірник. */
@@ -292,6 +295,18 @@ export async function terrarium_delete_mod_group(instanceId: string, name: strin
 }
 
 /** Перемістити файли в групу (null — прибрати з групи). Повертає нові шляхи. */
+export async function terrarium_set_mod_group_enabled(
+	instanceId: string,
+	name: string,
+	enabled: boolean,
+) {
+	return await invoke<void>('plugin:terrarium|terrarium_set_mod_group_enabled', {
+		instanceId,
+		name,
+		enabled,
+	})
+}
+
 export async function terrarium_set_mod_group(
 	instanceId: string,
 	paths: string[],

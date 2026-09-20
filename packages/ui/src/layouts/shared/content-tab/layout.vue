@@ -40,6 +40,7 @@ import DropdownFilterBar from '#ui/components/base/DropdownFilterBar.vue'
 import EmptyState from '#ui/components/base/EmptyState.vue'
 import FilterPills from '#ui/components/base/FilterPills.vue'
 import Input from '#ui/components/base/inputs/Input.vue'
+import Toggle from '#ui/components/base/Toggle.vue'
 import { useDebugLogger } from '#ui/composables/debug-logger'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { commonMessages, formatContentTypeSentence } from '#ui/utils/common-messages'
@@ -87,6 +88,11 @@ const messages = defineMessages({
 	groupUngrouped: { id: 'content.mod-groups.ungrouped', defaultMessage: 'Без групи' },
 	groupNew: { id: 'content.mod-groups.new', defaultMessage: 'Нова група' },
 	groupRename: { id: 'content.mod-groups.rename', defaultMessage: 'Перейменувати' },
+	groupEnabled: { id: 'content.mod-groups.enabled', defaultMessage: 'Група ввімкнена' },
+	groupDisabled: {
+		id: 'content.mod-groups.disabled',
+		defaultMessage: 'Група вимкнена — гра її не читає',
+	},
 	groupDissolve: { id: 'content.mod-groups.dissolve', defaultMessage: 'Розформувати' },
 	groupDissolveTooltip: {
 		id: 'content.mod-groups.dissolve-tooltip',
@@ -580,6 +586,14 @@ function promptCreateGroup() {
 		await modGroups!.create(name)
 		showEmptyGroups.value = true
 	})
+}
+
+function isGroupDisabled(name: string | null) {
+	return !!name && !!modGroups?.disabledGroups?.value.includes(name)
+}
+
+async function setGroupEnabled(name: string, enabled: boolean) {
+	await modGroups?.setEnabled?.(name, enabled)
 }
 
 function promptRenameGroup(name: string) {
@@ -1556,11 +1570,12 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 									v-for="section in groupedSections"
 									:key="section.key"
 									class="mod-group rounded-2xl border border-solid bg-surface-1 transition-colors"
-									:class="
+									:class="[
 										dropTargetKey === section.key
 											? 'border-brand bg-brand-highlight'
-											: 'border-surface-4'
-									"
+											: 'border-surface-4',
+										isGroupDisabled(section.name) ? 'mod-group--disabled' : '',
+									]"
 									:data-group-key="section.key"
 								>
 									<div class="flex items-center gap-2 px-3 py-2">
@@ -1581,6 +1596,17 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 											<span class="text-sm text-secondary">{{ section.items.length }}</span>
 										</button>
 										<template v-if="section.name">
+											<Toggle
+												v-if="modGroups?.setEnabled"
+												v-tooltip="
+													isGroupDisabled(section.name)
+														? formatMessage(messages.groupDisabled)
+														: formatMessage(messages.groupEnabled)
+												"
+												:model-value="!isGroupDisabled(section.name)"
+												:aria-label="formatMessage(messages.groupEnabled)"
+												@update:model-value="setGroupEnabled(section.name, $event)"
+											/>
 											<Button
 												v-tooltip="formatMessage(messages.groupRename)"
 												type="transparent"
@@ -1909,6 +1935,12 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 </template>
 
 <style scoped>
+/* Вимкнена група: приглушено, як вимкнений мод */
+.mod-group--disabled .mod-group__table,
+.mod-group--disabled > div:first-child > button {
+	opacity: 0.55;
+}
+
 .mod-group__table :deep([data-drag-id]) {
 	cursor: grab;
 	touch-action: none;

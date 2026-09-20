@@ -31,6 +31,10 @@ export interface ContentDependencyWarning {
  */
 export interface ContentModGroups {
 	groups: Ref<string[]> | ComputedRef<string[]>
+	/** Групи, вимкнені цілком (папка `<Група>.disabled`) */
+	disabledGroups?: Ref<string[]> | ComputedRef<string[]>
+	/** Увімкнути/вимкнути групу цілком — перейменовує папку */
+	setEnabled?: (name: string, enabled: boolean) => Promise<void>
 	groupOf: (item: ContentItem) => string | null
 	/** Чи можна переносити цей елемент між групами (лише моди) */
 	canGroup: (item: ContentItem) => boolean

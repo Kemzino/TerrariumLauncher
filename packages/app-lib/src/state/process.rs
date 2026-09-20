@@ -972,15 +972,6 @@ impl Process {
             }
         });
 
-        // Terrarium: повернути моди в їхні групи після виходу з гри
-        if let Err(e) = crate::state::instances::commands::restore_mods(
-            &state.directories.instances_dir().join(&instance_path),
-        )
-        .await
-        {
-            tracing::warn!("Failed to restore mod groups after exit: {e}");
-        }
-
         let logs_folder = state.directories.instance_logs_dir(&instance_path);
         let log_path = logs_folder.join(LAUNCHER_LOG_PATH);
 
