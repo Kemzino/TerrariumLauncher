@@ -402,6 +402,67 @@ where
     Ok(())
 }
 
+/// Terrarium: примірник, підхоплений із бази Modrinth App (спільна тека даних).
+/// Мінімум полів — решту (моди, конфіги) сканер підбере з диска.
+pub(crate) struct ImportedInstance {
+    pub path: String,
+    pub name: String,
+    pub icon_path: Option<String>,
+    pub game_version: String,
+    pub loader: ModLoader,
+    pub loader_version: Option<String>,
+    pub modrinth_project_id: Option<String>,
+    pub modrinth_version_id: Option<String>,
+    pub created: i64,
+    pub modified: i64,
+    pub last_played: Option<i64>,
+}
+
+pub(crate) async fn upsert_imported_instance<'a, E>(
+    exec: E,
+    input: ImportedInstance,
+) -> crate::Result<()>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Sqlite> + Copy,
+{
+    let ts = |secs: i64| DateTime::from_timestamp(secs, 0).unwrap_or_else(Utc::now);
+    let linked_data = match (input.modrinth_project_id, input.modrinth_version_id) {
+        (Some(project_id), Some(version_id)) => Some(LegacyLinkedData {
+            project_id: Some(project_id),
+            version_id: Some(version_id),
+        }),
+        _ => None,
+    };
+    upsert_legacy_instance(
+        exec,
+        LegacyInstanceUpsert {
+            path: input.path,
+            install_stage: InstanceInstallStage::Installed,
+            launcher_feature_version: LauncherFeatureVersion::None,
+            name: input.name,
+            icon_path: input.icon_path,
+            game_version: input.game_version,
+            loader: input.loader,
+            loader_version: input.loader_version,
+            groups: Vec::new(),
+            linked_data,
+            created: ts(input.created),
+            modified: ts(input.modified),
+            last_played: input.last_played.map(ts),
+            submitted_time_played: 0,
+            recent_time_played: 0,
+            java_path: None,
+            extra_launch_args: None,
+            custom_env_vars: None,
+            memory: None,
+            force_fullscreen: None,
+            game_resolution: None,
+            hooks: Hooks::default(),
+        },
+    )
+    .await
+}
+
 struct LegacyInstanceUpsert {
     path: String,
     install_stage: InstanceInstallStage,

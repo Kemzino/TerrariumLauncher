@@ -3,6 +3,7 @@ import { CheckCircleIcon, KeyIcon, SpinnerIcon, TrashIcon, XIcon } from '@modrin
 import { Button, defineMessages, injectNotificationManager, Input, useVIntl } from '@modrinth/ui'
 import { onMounted, ref } from 'vue'
 
+import TerrariumModrinthCard from '@/components/ui/TerrariumModrinthCard.vue'
 import { useTerrariumState } from '@/composables/use-terrarium-state'
 import { type AdminInfo, terrarium_verify_admin_token } from '@/helpers/terrarium'
 
@@ -230,5 +231,7 @@ onMounted(load)
 				</Button>
 			</div>
 		</div>
+
+		<TerrariumModrinthCard class="mt-6" />
 	</section>
 </template>

@@ -17,6 +17,7 @@ pub mod server_address;
 pub mod settings;
 pub mod tags;
 pub mod terrarium;
+pub mod terrarium_modrinth;
 pub mod terrarium_sync;
 pub mod users;
 pub mod worlds;

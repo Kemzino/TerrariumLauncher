@@ -191,6 +191,34 @@ export async function terrarium_sync_apply(request: SyncRequest) {
 	return await invoke<SyncResult>('plugin:terrarium|terrarium_sync_apply', { request })
 }
 
+// ---------------------------------------------------------------------------
+// Спільна тека даних із Modrinth App
+
+export interface ModrinthAppInfo {
+	path: string
+	instances: number
+	importable: number
+	already_shared: boolean
+}
+
+export interface ModrinthImportResult {
+	imported: number
+	skipped: number
+}
+
+export async function terrarium_detect_modrinth_app() {
+	return await invoke<ModrinthAppInfo | null>('plugin:terrarium|terrarium_detect_modrinth_app')
+}
+
+/** Записує custom_dir; застосовується після перезапуску лаунчера. */
+export async function terrarium_use_modrinth_directory() {
+	return await invoke<string>('plugin:terrarium|terrarium_use_modrinth_directory')
+}
+
+export async function terrarium_import_modrinth_instances() {
+	return await invoke<ModrinthImportResult>('plugin:terrarium|terrarium_import_modrinth_instances')
+}
+
 export async function terrarium_verify_admin_token(token: string) {
 	return await invoke<AdminInfo>('plugin:terrarium|terrarium_verify_admin_token', { token })
 }

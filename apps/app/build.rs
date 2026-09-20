@@ -361,6 +361,9 @@ fn main() {
                         "terrarium_promote_release",
                         "terrarium_sync_preview",
                         "terrarium_sync_apply",
+                        "terrarium_detect_modrinth_app",
+                        "terrarium_use_modrinth_directory",
+                        "terrarium_import_modrinth_instances",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

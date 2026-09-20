@@ -27,9 +27,12 @@ import terrariumLogo from '@/assets/terrarium/logo.png'
 import AccountsCard from '@/components/ui/AccountsCard.vue'
 import TerrariumBackdrop from '@/components/ui/TerrariumBackdrop.vue'
 import TerrariumInstancePicker from '@/components/ui/TerrariumInstancePicker.vue'
+import TerrariumNewsWidget from '@/components/ui/TerrariumNewsWidget.vue'
 import TerrariumPublishModal from '@/components/ui/TerrariumPublishModal.vue'
+import TerrariumServerStatusWidget from '@/components/ui/TerrariumServerStatusWidget.vue'
 import TerrariumSyncModal from '@/components/ui/TerrariumSyncModal.vue'
 import { useAppEvent } from '@/composables/use-app-event'
+import { useAppSettings } from '@/composables/use-app-settings'
 import { handleSevereError } from '@/composables/use-error.js'
 import { useTerrariumState } from '@/composables/use-terrarium-state'
 import type { InstallJobSnapshot } from '@/generated/app-events/InstallJobSnapshot'
@@ -184,6 +187,9 @@ const {
 } = useTerrariumState()
 
 const isServer = computed(() => activePack.value === 'server')
+const appSettings = useAppSettings()
+const showNews = computed(() => appSettings.getFeatureFlag('terrarium_show_news'))
+const showServerStatus = computed(() => appSettings.getFeatureFlag('terrarium_show_server_status'))
 const isTest = computed(() => activeChannel.value === 'test')
 // У тестовому каналі реліз може виявитись звичайним — тестових версій просто нема
 const hasTestRelease = computed(() => isTest.value && release.value?.prerelease === true)
@@ -833,12 +839,16 @@ onMounted(async () => {
 						<GithubIcon />
 					</button>
 				</div>
-				<aside class="terrarium-hero__account">
-					<h3 class="terrarium-hero__account-title">{{ formatMessage(messages.playingAs) }}</h3>
-					<Suspense>
-						<AccountsCard />
-					</Suspense>
-				</aside>
+				<div class="terrarium-hero__panels">
+					<TerrariumServerStatusWidget v-if="showServerStatus" class="terrarium-hero__panel" />
+					<TerrariumNewsWidget v-if="showNews" class="terrarium-hero__panel" />
+					<aside class="terrarium-hero__account">
+						<h3 class="terrarium-hero__account-title">{{ formatMessage(messages.playingAs) }}</h3>
+						<Suspense>
+							<AccountsCard />
+						</Suspense>
+					</aside>
+				</div>
 			</div>
 		</div>
 
@@ -1167,6 +1177,21 @@ onMounted(async () => {
 	width: 0.95rem;
 	height: 0.95rem;
 	color: var(--color-brand);
+}
+
+.terrarium-hero__panels {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	width: 300px;
+}
+
+// Віджети в hero — у тому ж «скляному» стилі, що й картка акаунта
+.terrarium-hero__panel {
+	background: var(--terrarium-glass) !important;
+	border-color: color-mix(in srgb, var(--color-contrast) 12%, transparent) !important;
+	backdrop-filter: blur(14px);
+	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
 }
 
 .terrarium-hero__account {

@@ -59,7 +59,7 @@ mod mr_auth;
 
 pub use self::mr_auth::*;
 
-mod legacy_converter;
+pub(crate) mod legacy_converter;
 
 pub mod attached_world_data;
 pub mod server_join_log;

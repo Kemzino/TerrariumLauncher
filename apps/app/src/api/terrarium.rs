@@ -6,6 +6,9 @@ use theseus::terrarium::{
     self, AdminInfo, Channel, ContentGroup, PackKind, PublishPreview,
     PublishRequest, PublishedRelease, TerrariumRelease, TerrariumState,
 };
+use theseus::terrarium_modrinth::{
+    self, ModrinthAppInfo, ModrinthImportResult,
+};
 use theseus::terrarium_sync::{self, SyncPreview, SyncRequest, SyncResult};
 
 pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
@@ -28,6 +31,9 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             terrarium_promote_release,
             terrarium_sync_preview,
             terrarium_sync_apply,
+            terrarium_detect_modrinth_app,
+            terrarium_use_modrinth_directory,
+            terrarium_import_modrinth_instances,
         ])
         .build()
 }
@@ -70,6 +76,23 @@ pub async fn terrarium_sync_preview(
         terrarium_sync::sync_preview(client_instance_id, server_instance_id)
             .await?,
     )
+}
+
+#[tauri::command]
+pub async fn terrarium_detect_modrinth_app() -> Result<Option<ModrinthAppInfo>>
+{
+    Ok(terrarium_modrinth::detect_modrinth_app().await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_use_modrinth_directory() -> Result<String> {
+    Ok(terrarium_modrinth::use_modrinth_directory().await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_import_modrinth_instances()
+-> Result<ModrinthImportResult> {
+    Ok(terrarium_modrinth::import_modrinth_instances().await?)
 }
 
 #[tauri::command]
