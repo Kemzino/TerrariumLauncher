@@ -40,11 +40,23 @@ interface NewsMessage {
 	embeds: NewsEmbed[]
 	url: string
 }
+/** Пост форумного каналу: назва + перше повідомлення як обкладинка. */
+interface NewsPost {
+	id: string
+	title: string
+	tags: string[]
+	message_count: number
+	created_at: string | null
+	url: string
+	starter: NewsMessage | null
+}
 interface NewsChannel {
 	id: string
 	name: string
 	url: string
+	kind?: 'text' | 'forum'
 	messages: NewsMessage[]
+	posts?: NewsPost[]
 }
 interface NewsFeed {
 	generated_at: string
@@ -71,6 +83,13 @@ const messages = defineMessages({
 	expand: { id: 'terrarium.news.expand', defaultMessage: 'Розгорнути' },
 	refresh: { id: 'terrarium.news.refresh', defaultMessage: 'Оновити' },
 	attachment: { id: 'terrarium.news.attachment', defaultMessage: 'Вкладення: {name}' },
+	replies: {
+		id: 'terrarium.news.replies',
+		defaultMessage:
+			'{count, plural, =0 {без відповідей} one {# відповідь} few {# відповіді} other {# відповідей}}',
+	},
+	openPost: { id: 'terrarium.news.open-post', defaultMessage: 'Відкрити пост у Discord' },
+	morePhotos: { id: 'terrarium.news.more-photos', defaultMessage: '+{count}' },
 	edited: { id: 'terrarium.news.edited', defaultMessage: '(змінено)' },
 })
 
@@ -94,7 +113,7 @@ async function refresh() {
 	if (loading.value) return
 	loading.value = true
 	try {
-		// raw.githubusercontent кешує ~5 хв; параметр збиває проміжні кеші
+		// raw.githubusercontent кешує до 5 хв; параметр збиває проміжні кеші
 		const res = await fetch(`${TERRARIUM_NEWS_URL}?t=${Date.now()}`, { cache: 'no-store' })
 		if (!res.ok) throw new Error(`HTTP ${res.status}`)
 		const data = (await res.json()) as NewsFeed
@@ -154,6 +173,17 @@ function imagesOf(item: NewsMessage): LightboxImage[] {
 			.filter((e) => e.image)
 			.map((e) => ({ url: e.image!, name: e.title ?? undefined, caption })),
 	]
+}
+
+function coverOf(post: NewsPost): LightboxImage[] {
+	if (!post.starter) return []
+	return imagesOf(post.starter).map((img) => ({ ...img, caption: post.title }))
+}
+
+function openPostImage(post: NewsPost, index = 0) {
+	const list = coverOf(post)
+	if (list.length) lightbox.value?.show(list, index)
+	else void openUrl(post.url)
 }
 
 function openImage(item: NewsMessage, url: string) {
@@ -239,7 +269,56 @@ onBeforeUnmount(() => {
 				</button>
 			</div>
 
-			<div v-if="activeChannel" class="terrarium-news__list">
+			<div v-if="activeChannel?.kind === 'forum'" class="terrarium-news__list">
+				<p v-if="!activeChannel.posts?.length" class="m-0 text-sm text-secondary">
+					{{ formatMessage(messages.emptyChannel) }}
+				</p>
+				<div v-else class="terrarium-news__posts">
+					<article
+						v-for="post in activeChannel.posts"
+						:key="post.id"
+						class="terrarium-news__post"
+						:title="post.title"
+						@click="openPostImage(post)"
+					>
+						<div class="terrarium-news__post-cover">
+							<img
+								v-if="coverOf(post)[0]"
+								:src="coverOf(post)[0].url"
+								:alt="post.title"
+								loading="lazy"
+							/>
+							<span v-if="coverOf(post).length > 1" class="terrarium-news__post-more">
+								{{ formatMessage(messages.morePhotos, { count: coverOf(post).length - 1 }) }}
+							</span>
+						</div>
+						<div class="terrarium-news__post-body">
+							<strong class="terrarium-news__post-title">{{ post.title }}</strong>
+							<span class="terrarium-news__post-meta">
+								<template v-if="post.starter">{{ post.starter.author }} · </template>
+								<template v-if="post.created_at">{{ relative(post.created_at) }} · </template>
+								{{
+									formatMessage(messages.replies, { count: Math.max(0, post.message_count - 1) })
+								}}
+							</span>
+						</div>
+						<button
+							v-tooltip="formatMessage(messages.openPost)"
+							type="button"
+							class="terrarium-news__open"
+							:aria-label="formatMessage(messages.openPost)"
+							@click.stop="openUrl(post.url)"
+						>
+							<ExternalIcon />
+						</button>
+					</article>
+				</div>
+				<Button size="sm" type="transparent" class="self-start" @click="openUrl(activeChannel.url)">
+					<ExternalIcon /> {{ formatMessage(messages.openChannel) }}
+				</Button>
+			</div>
+
+			<div v-else-if="activeChannel" class="terrarium-news__list">
 				<p v-if="!activeChannel.messages.length" class="m-0 text-sm text-secondary">
 					{{ formatMessage(messages.emptyChannel) }}
 				</p>
@@ -366,6 +445,78 @@ onBeforeUnmount(() => {
 	display: flex;
 	gap: 0.6rem;
 	min-width: 0;
+}
+
+// Форум: список постів — обкладинка + назва + автор/час/відповіді
+.terrarium-news__posts {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+}
+
+.terrarium-news__post {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.3rem;
+	border-radius: var(--radius-md);
+	cursor: pointer;
+	transition: background-color 0.12s ease;
+
+	&:hover {
+		background: var(--color-button-bg);
+	}
+}
+
+.terrarium-news__post-cover {
+	position: relative;
+	flex-shrink: 0;
+	width: 4.25rem;
+	height: 3.25rem;
+	overflow: hidden;
+	border-radius: var(--radius-sm);
+	background: var(--color-button-bg);
+
+	img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+}
+
+.terrarium-news__post-more {
+	position: absolute;
+	right: 0.2rem;
+	bottom: 0.2rem;
+	padding: 0 0.3rem;
+	border-radius: 999px;
+	background: rgba(0, 0, 0, 0.65);
+	color: #fff;
+	font-size: 0.7rem;
+	font-weight: 600;
+}
+
+.terrarium-news__post-body {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+	flex-direction: column;
+	gap: 0.1rem;
+}
+
+.terrarium-news__post-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--color-contrast);
+}
+
+.terrarium-news__post-meta {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 0.75rem;
+	color: var(--color-secondary);
 }
 
 .terrarium-news__avatar {
