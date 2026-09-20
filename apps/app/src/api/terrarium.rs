@@ -34,6 +34,7 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             terrarium_detect_modrinth_app,
             terrarium_use_modrinth_directory,
             terrarium_import_modrinth_instances,
+            terrarium_open_discord,
         ])
         .build()
 }
@@ -178,4 +179,72 @@ pub async fn terrarium_set_mod_group(
     group: Option<String>,
 ) -> Result<Vec<String>> {
     Ok(terrarium::set_mod_group(instance_id, paths, group).await?)
+}
+
+/// Чи зареєстровано в системі обробник протоколу `discord://` (десктоп-застосунок).
+fn discord_app_installed() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::RegKey;
+        use winreg::enums::HKEY_CLASSES_ROOT;
+        RegKey::predef(HKEY_CLASSES_ROOT)
+            .open_subkey(r"discord\shell\open\command")
+            .is_ok()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        [
+            "/Applications/Discord.app",
+            "/Applications/Discord PTB.app",
+            "/Applications/Discord Canary.app",
+        ]
+        .iter()
+        .any(|p| std::path::Path::new(p).exists())
+            || dirs::home_dir()
+                .map(|h| h.join("Applications/Discord.app").exists())
+                .unwrap_or(false)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-mime")
+            .args(["query", "default", "x-scheme-handler/discord"])
+            .output()
+            .map(|o| o.status.success() && !o.stdout.is_empty())
+            .unwrap_or(false)
+    }
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "linux"
+    )))]
+    {
+        false
+    }
+}
+
+/// Відкрити посилання Discord у застосунку (діплінк `discord://-/…`), а якщо
+/// застосунку немає — у браузері. Повертає `true`, якщо пішло в застосунок.
+#[tauri::command]
+pub async fn terrarium_open_discord<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    url: String,
+) -> Result<bool> {
+    use tauri_plugin_opener::OpenerExt;
+    let https = url.clone();
+    let deep = url
+        .strip_prefix("https://discord.com/")
+        .or_else(|| url.strip_prefix("https://discordapp.com/"))
+        .map(|rest| format!("discord://-/{rest}"));
+    let use_app = deep.is_some()
+        && tauri::async_runtime::spawn_blocking(discord_app_installed)
+            .await
+            .unwrap_or(false);
+    let target = if use_app { deep.unwrap() } else { https };
+    app.opener().open_url(&target, None::<&str>).map_err(|e| {
+        theseus::ErrorKind::OtherError(format!(
+            "Не вдалося відкрити {target}: {e}"
+        ))
+        .as_error()
+    })?;
+    Ok(use_app)
 }

@@ -364,6 +364,7 @@ fn main() {
                         "terrarium_detect_modrinth_app",
                         "terrarium_use_modrinth_directory",
                         "terrarium_import_modrinth_instances",
+                        "terrarium_open_discord",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

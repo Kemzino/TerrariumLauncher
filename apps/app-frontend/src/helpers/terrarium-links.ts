@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
 
 /** Зовнішні посилання спільноти Terrarium — одне місце для всіх іконок у лаунчері. */
@@ -16,5 +17,21 @@ export const TERRARIUM_NEWS_URL =
 	'https://raw.githubusercontent.com/Kemzino/TerrariumNews/main/news.json'
 
 export function openTerrariumLink(key: keyof typeof TERRARIUM_LINKS) {
-	void openUrl(TERRARIUM_LINKS[key])
+	void openDiscordLink(TERRARIUM_LINKS[key])
+}
+
+/**
+ * Посилання Discord відкриваємо в застосунку (діплінк `discord://`), а якщо
+ * його не встановлено — у браузері. Інші URL — як звичайно.
+ */
+export async function openDiscordLink(url: string) {
+	if (!/^https:\/\/(discord|discordapp)\.com\//.test(url)) {
+		await openUrl(url)
+		return
+	}
+	try {
+		await invoke<boolean>('plugin:terrarium|terrarium_open_discord', { url })
+	} catch {
+		await openUrl(url)
+	}
 }
