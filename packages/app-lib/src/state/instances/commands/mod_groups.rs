@@ -385,7 +385,11 @@ pub(crate) async fn set_mod_group(
     io::rename_or_move(base.join(project_path), base.join(&new_path)).await?;
     ensure_readme(&mods_dir).await?;
 
-    let enabled = !new_path.ends_with(".disabled");
+    // Вимкнено, якщо сам файл `.disabled` або він у вимкненій групі
+    let enabled = !file_name.ends_with(DISABLED_SUFFIX)
+        && !group_dir_name
+            .as_deref()
+            .is_some_and(|g| g.ends_with(DISABLED_SUFFIX));
     let mut tx = state.pool.begin().await?;
     content_rows::rename_instance_file(
         &scope.instance.id,

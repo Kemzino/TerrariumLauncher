@@ -1550,9 +1550,27 @@ async function refreshModGroups() {
 	disabledModGroups.value = groups.filter((group) => !group.enabled).map((group) => group.name)
 }
 
+// Після зміни груп бекенд емітить `synced` → обробник нижче запускає свій
+// initProjects() з кешем; якщо він стартує першим, TanStack дедуплікує наш
+// must_revalidate у нього — і список лишається старим. Тому спершу скасовуємо
+// активний запит цієї query, потім перечитуємо примусово.
 async function afterModGroupChange() {
 	await refreshModGroups()
+	await queryClient.cancelQueries({ queryKey: instanceKeys.content(instance.value.id) })
 	await initProjects('must_revalidate')
+}
+
+// Файловий watcher бачить перейменування jar/папок із затримкою ~1 с і сам
+// перечитує уміст у БД; після цього він емітить `edited` — підхоплюємо, щоб
+// список завжди відповідав диску, навіть якщо наш refresh випередив його.
+let editedRefreshTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleContentRefresh() {
+	if (editedRefreshTimer) clearTimeout(editedRefreshTimer)
+	editedRefreshTimer = setTimeout(() => {
+		editedRefreshTimer = null
+		void refreshModGroups()
+		void initProjects('must_revalidate')
+	}, 300)
 }
 
 // Групи у вікні «Уміст збірки» — за тим самим шляхом файлу; там моди збірки
@@ -1869,14 +1887,12 @@ let isUnmounted = false
 let unlistenDragDrop: UnlistenFn | null = null
 
 useAppEvent('instance', async (event) => {
-	if (
-		instance.value &&
-		event.instance_id === instance.value.id &&
-		event.event === 'synced' &&
-		instance.value.install_stage === 'installed' &&
-		!isBulkOperating.value
-	) {
+	if (!instance.value || event.instance_id !== instance.value.id) return
+	if (instance.value.install_stage !== 'installed' || isBulkOperating.value) return
+	if (event.event === 'synced') {
 		await initProjects()
+	} else if (event.event === 'edited') {
+		scheduleContentRefresh()
 	}
 })
 
@@ -1933,6 +1949,7 @@ watch(
 
 onUnmounted(() => {
 	isUnmounted = true
+	if (editedRefreshTimer) clearTimeout(editedRefreshTimer)
 	removeBeforeEach()
 	unlistenDragDrop?.()
 })
