@@ -63,13 +63,16 @@ function onKey(event: KeyboardEvent) {
 			return
 	}
 	event.preventDefault()
+	// Esc не має закривати ще й модалку поста під лайтбоксом
+	event.stopPropagation()
 }
 
+// capture — щоб перехопити Esc раніше за NewModal
 watch(open, (value) => {
-	if (value) window.addEventListener('keydown', onKey)
-	else window.removeEventListener('keydown', onKey)
+	if (value) window.addEventListener('keydown', onKey, true)
+	else window.removeEventListener('keydown', onKey, true)
 })
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
 
 defineExpose({ show, hide })
 </script>
@@ -152,7 +155,8 @@ defineExpose({ show, hide })
 .terrarium-lightbox {
 	position: fixed;
 	inset: 0;
-	z-index: 100;
+	// Вище за стек NewModal (100 + 10·глибина + 21): лайтбокс відкривається і з модалки поста
+	z-index: 1000;
 	display: flex;
 	align-items: center;
 	justify-content: center;
