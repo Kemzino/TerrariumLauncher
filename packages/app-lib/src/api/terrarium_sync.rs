@@ -160,7 +160,19 @@ fn snapshot(instance_dir: &Path) -> Snapshot {
     let mods_dir = instance_dir.join(commands::MODS_FOLDER);
     let mut mods = BTreeMap::new();
     mods_in(&mods_dir, None, &mut mods);
-    if let Ok(entries) = std::fs::read_dir(&mods_dir) {
+    // Групи можуть бути вкладені: група = шлях папок як на диску (`A/B`)
+    fn walk_groups(
+        dir: &Path,
+        group: &str,
+        depth: usize,
+        mods: &mut BTreeMap<String, FileInfo>,
+    ) {
+        if depth > 8 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             let Some(name) = entry.file_name().to_str().map(str::to_string)
@@ -168,10 +180,17 @@ fn snapshot(instance_dir: &Path) -> Snapshot {
                 continue;
             };
             if path.is_dir() && commands::is_group_dir_name(&name) {
-                mods_in(&path, Some(&name), &mut mods);
+                let sub = if group.is_empty() {
+                    name
+                } else {
+                    format!("{group}/{name}")
+                };
+                mods_in(&path, Some(&sub), mods);
+                walk_groups(&path, &sub, depth + 1, mods);
             }
         }
     }
+    walk_groups(&mods_dir, "", 1, &mut mods);
     let mut configs = BTreeMap::new();
     for root in CONFIG_ROOTS {
         let dir = instance_dir.join(root);

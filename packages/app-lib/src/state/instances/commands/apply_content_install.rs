@@ -298,12 +298,13 @@ pub(crate) async fn switch_project_version_with_dependencies(
         remove_project(instance_id, project_path, state).await?;
         // Terrarium: інша версія мода лишається в тій самій групі
         if let Some(group) = super::mod_groups::group_of(project_path)
-            && super::mod_groups::group_of(&new_path) != Some(group)
+            && super::mod_groups::group_of(&new_path).as_deref()
+                != Some(group.as_str())
         {
             new_path = super::mod_groups::set_mod_group(
                 instance_id,
                 &new_path,
-                Some(group),
+                Some(&group),
                 state,
             )
             .await?;

@@ -251,18 +251,39 @@ export async function terrarium_apply_pack_branding(instanceId: string) {
 // Групи модів: справжні підпапки mods/<Група>/, на час гри розкладаються в корінь
 
 export interface ContentGroup {
+	/** Шлях групи `A/B/C` (без `.disabled`) */
+	path: string
+	/** Останній сегмент */
 	name: string
+	parent: string | null
+	/** Файлів безпосередньо в цій папці */
 	files: number
-	/** `false` — папка `<Група>.disabled`, гра її не читає */
+	/** `false` — ця папка або предок має суфікс `.disabled` */
 	enabled: boolean
 }
 
-/** `mods/Група/x.jar` або `mods/Група.disabled/x.jar` → `Група`; інакше null */
+const DISABLED_SUFFIX = '.disabled'
+
+/** `mods/A/B.disabled/x.jar` → `A/B` (шлях групи без суфіксів); `mods/x.jar` → null */
 export function modGroupOf(filePath: string | undefined | null): string | null {
 	if (!filePath) return null
 	const parts = filePath.split('/')
-	if (parts.length !== 3 || parts[0] !== 'mods') return null
-	return parts[1].endsWith('.disabled') ? parts[1].slice(0, -'.disabled'.length) : parts[1]
+	if (parts.length < 3 || parts[0] !== 'mods') return null
+	return parts
+		.slice(1, -1)
+		.map((seg) => (seg.endsWith(DISABLED_SUFFIX) ? seg.slice(0, -DISABLED_SUFFIX.length) : seg))
+		.join('/')
+}
+
+/** Останній сегмент шляху групи: `A/B` → `B` */
+export function modGroupName(groupPath: string) {
+	return groupPath.split('/').pop() ?? groupPath
+}
+
+/** Батьківська група: `A/B` → `A`, `A` → null */
+export function modGroupParent(groupPath: string): string | null {
+	const i = groupPath.lastIndexOf('/')
+	return i === -1 ? null : groupPath.slice(0, i)
 }
 
 /** Перед оновленням збірки в наявний примірник. */

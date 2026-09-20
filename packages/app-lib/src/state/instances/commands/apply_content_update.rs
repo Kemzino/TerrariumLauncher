@@ -117,8 +117,8 @@ async fn apply_content_update(
         )
         .await?;
         remove_project(instance_id, project_path, state).await?;
-        new_path = keep_mod_group(instance_id, project_path, new_path, state)
-            .await?;
+        new_path =
+            keep_mod_group(instance_id, project_path, new_path, state).await?;
     }
 
     Ok(new_path)
@@ -134,11 +134,17 @@ async fn keep_mod_group(
     let Some(group) = super::mod_groups::group_of(old_path) else {
         return Ok(new_path);
     };
-    if super::mod_groups::group_of(&new_path) == Some(group) {
+    if super::mod_groups::group_of(&new_path).as_deref() == Some(group.as_str())
+    {
         return Ok(new_path);
     }
-    super::mod_groups::set_mod_group(instance_id, &new_path, Some(group), state)
-        .await
+    super::mod_groups::set_mod_group(
+        instance_id,
+        &new_path,
+        Some(&group),
+        state,
+    )
+    .await
 }
 
 pub(crate) async fn update_all_projects(

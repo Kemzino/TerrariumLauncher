@@ -671,7 +671,12 @@ defineExpose({ show, showLoading, hide, getState, restore, updateItem, setItems 
 								/>
 								<FolderIcon v-if="section.name" class="size-5 shrink-0 text-secondary" />
 								<span class="truncate font-semibold">
-									{{ section.name ?? formatMessage(messages.ungrouped) }}
+									<!-- Вкладені групи: шлях `A/B` показуємо як «A / B» -->
+									{{
+										section.name
+											? section.name.split('/').join(' / ')
+											: formatMessage(messages.ungrouped)
+									}}
 								</span>
 								<span class="text-sm text-secondary">{{ section.items.length }}</span>
 							</button>

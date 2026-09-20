@@ -87,6 +87,7 @@ const props = withDefaults(
 const messages = defineMessages({
 	groupUngrouped: { id: 'content.mod-groups.ungrouped', defaultMessage: 'Без групи' },
 	groupNew: { id: 'content.mod-groups.new', defaultMessage: 'Нова група' },
+	groupNewSub: { id: 'content.mod-groups.new-sub', defaultMessage: 'Нова підгрупа' },
 	groupRename: { id: 'content.mod-groups.rename', defaultMessage: 'Перейменувати' },
 	groupEnabled: { id: 'content.mod-groups.enabled', defaultMessage: 'Група ввімкнена' },
 	groupDisabled: {
@@ -530,10 +531,28 @@ const collapsedGroups = ctx.filterPersistKey
 	: ref<Record<string, boolean>>({})
 const UNGROUPED_KEY = '\u0000ungrouped'
 
+/**
+ * Секція списку: група (`name` — шлях `A/B`, `displayName` — останній сегмент,
+ * `depth` — рівень вкладення) або «без групи» (`name: null`). Порядок —
+ * обхід дерева: батько, потім його діти за абеткою.
+ */
 interface GroupedSection {
 	key: string
 	name: string | null
+	displayName: string
+	depth: number
+	parent: string | null
 	items: ContentCardTableItem[]
+	/** Файлів у групі разом з усіма підгрупами */
+	totalItems: number
+}
+
+function groupParent(path: string): string | null {
+	const i = path.lastIndexOf('/')
+	return i === -1 ? null : path.slice(0, i)
+}
+function groupDisplayName(path: string) {
+	return path.slice(path.lastIndexOf('/') + 1)
 }
 
 const allGroupedSections = computed<GroupedSection[]>(() => {
@@ -548,15 +567,59 @@ const allGroupedSections = computed<GroupedSection[]>(() => {
 		if (!buckets.has(group)) buckets.set(group, [])
 		buckets.get(group)!.push(row)
 	}
-	const sections: GroupedSection[] = []
-	for (const [name, items] of buckets) {
-		if (name === null) continue
-		// Порожні групи ховаємо лише коли активний пошук — щоб не заважали
-		if (items.length === 0 && searchQuery.value) continue
-		sections.push({ key: name, name, items })
+	// Проміжні рівні (`A` для `A/B`), яких бекенд не повернув, — теж секції
+	for (const name of [...buckets.keys()]) {
+		let parent = name === null ? null : groupParent(name)
+		while (parent !== null) {
+			if (!buckets.has(parent)) buckets.set(parent, [])
+			parent = groupParent(parent)
+		}
 	}
-	sections.sort((a, b) => a.name!.localeCompare(b.name!, undefined, { sensitivity: 'base' }))
-	sections.push({ key: UNGROUPED_KEY, name: null, items: buckets.get(null) ?? [] })
+	const children = new Map<string | null, string[]>()
+	for (const name of buckets.keys()) {
+		if (name === null) continue
+		const parent = groupParent(name)
+		if (!children.has(parent)) children.set(parent, [])
+		children.get(parent)!.push(name)
+	}
+	const byName = (a: string, b: string) =>
+		groupDisplayName(a).localeCompare(groupDisplayName(b), undefined, { sensitivity: 'base' })
+	const totals = new Map<string, number>()
+	const total = (name: string): number => {
+		if (totals.has(name)) return totals.get(name)!
+		const own = buckets.get(name)?.length ?? 0
+		const sub = (children.get(name) ?? []).reduce((acc, c) => acc + total(c), 0)
+		totals.set(name, own + sub)
+		return own + sub
+	}
+	const sections: GroupedSection[] = []
+	const visit = (parent: string | null, depth: number) => {
+		for (const name of (children.get(parent) ?? []).sort(byName)) {
+			const items = buckets.get(name) ?? []
+			// Порожні гілки ховаємо лише коли активний пошук — щоб не заважали
+			if (total(name) === 0 && searchQuery.value) continue
+			sections.push({
+				key: name,
+				name,
+				displayName: groupDisplayName(name),
+				depth,
+				parent,
+				items,
+				totalItems: total(name),
+			})
+			visit(name, depth + 1)
+		}
+	}
+	visit(null, 0)
+	sections.push({
+		key: UNGROUPED_KEY,
+		name: null,
+		displayName: '',
+		depth: 0,
+		parent: null,
+		items: buckets.get(null) ?? [],
+		totalItems: buckets.get(null)?.length ?? 0,
+	})
 	return sections
 })
 
@@ -565,12 +628,20 @@ const allGroupedSections = computed<GroupedSection[]>(() => {
 // їх розкриває. Створення групи вмикає показ, інакше нікуди перетягувати.
 const showEmptyGroups = ref(false)
 const emptyGroupsCount = computed(
-	() => allGroupedSections.value.filter((s) => s.name !== null && s.items.length === 0).length,
+	() => allGroupedSections.value.filter((s) => s.name !== null && s.totalItems === 0).length,
 )
 const groupedSections = computed<GroupedSection[]>(() =>
-	showEmptyGroups.value
-		? allGroupedSections.value
-		: allGroupedSections.value.filter((s) => s.name === null || s.items.length > 0),
+	allGroupedSections.value.filter((s) => {
+		if (s.name === null) return true
+		if (!showEmptyGroups.value && s.totalItems === 0) return false
+		// Згорнутий предок ховає всю гілку
+		let parent = s.parent
+		while (parent !== null) {
+			if (collapsedGroups.value[parent]) return false
+			parent = groupParent(parent)
+		}
+		return true
+	}),
 )
 
 function isGroupCollapsed(key: string) {
@@ -581,10 +652,11 @@ function toggleGroupCollapsed(key: string) {
 	collapsedGroups.value = { ...collapsedGroups.value, [key]: !collapsedGroups.value[key] }
 }
 
-function promptCreateGroup() {
+function promptCreateGroup(parent: string | null = null) {
 	modGroupNameModal.value?.show('create', '', async (name) => {
-		await modGroups!.create(name)
+		await modGroups!.create(parent ? `${parent}/${name}` : name)
 		showEmptyGroups.value = true
+		if (parent) collapsedGroups.value = { ...collapsedGroups.value, [parent]: false }
 	})
 }
 
@@ -597,7 +669,9 @@ async function setGroupEnabled(name: string, enabled: boolean) {
 }
 
 function promptRenameGroup(name: string) {
-	modGroupNameModal.value?.show('rename', name, (next) => modGroups!.rename(name, next))
+	modGroupNameModal.value?.show('rename', groupDisplayName(name), (next) =>
+		modGroups!.rename(name, next),
+	)
 }
 
 async function dissolveGroup(name: string) {
@@ -610,12 +684,15 @@ const groupableSelectedItems = computed(() =>
 
 function groupMoveOptions(targets: () => ContentItem[]): ButtonMenuLeafOption[] {
 	if (!modGroups) return []
-	const options: ButtonMenuLeafOption[] = modGroups.groups.value.map((name) => ({
-		id: `group:${name}`,
-		label: name,
-		icon: FolderIcon,
-		action: () => void modGroups.move(targets(), name),
-	}))
+	// Групи деревом: відступ за глибиною, порядок як у списку
+	const options: ButtonMenuLeafOption[] = allGroupedSections.value
+		.filter((s) => s.name !== null)
+		.map((s) => ({
+			id: `group:${s.name}`,
+			label: `${'\u2003'.repeat(s.depth)}${s.displayName}`,
+			icon: FolderIcon,
+			action: () => void modGroups.move(targets(), s.name),
+		}))
 	options.push(
 		{
 			id: 'group:new',
@@ -1577,6 +1654,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 										isGroupDisabled(section.name) ? 'mod-group--disabled' : '',
 									]"
 									:data-group-key="section.key"
+									:style="section.depth ? { marginLeft: `${section.depth * 1.25}rem` } : undefined"
 								>
 									<div class="flex items-center gap-2 px-3 py-2">
 										<button
@@ -1591,9 +1669,13 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 											/>
 											<FolderIcon v-if="section.name" class="size-5 shrink-0 text-secondary" />
 											<span class="truncate font-semibold">
-												{{ section.name ?? formatMessage(messages.groupUngrouped) }}
+												{{
+													section.name
+														? section.displayName
+														: formatMessage(messages.groupUngrouped)
+												}}
 											</span>
-											<span class="text-sm text-secondary">{{ section.items.length }}</span>
+											<span class="text-sm text-secondary">{{ section.totalItems }}</span>
 										</button>
 										<template v-if="section.name">
 											<Toggle
@@ -1607,6 +1689,16 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 												:aria-label="formatMessage(messages.groupEnabled)"
 												@update:model-value="setGroupEnabled(section.name, $event)"
 											/>
+											<Button
+												v-tooltip="formatMessage(messages.groupNewSub)"
+												type="transparent"
+												size="sm"
+												icon-only
+												:aria-label="formatMessage(messages.groupNewSub)"
+												@click="promptCreateGroup(section.name)"
+											>
+												<PlusIcon />
+											</Button>
 											<Button
 												v-tooltip="formatMessage(messages.groupRename)"
 												type="transparent"
@@ -1660,7 +1752,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 									</div>
 								</section>
 								<div class="flex flex-wrap items-center gap-2">
-									<Button type="outlined" @click="promptCreateGroup">
+									<Button type="outlined" @click="promptCreateGroup()">
 										<PlusIcon />
 										{{ formatMessage(messages.groupNew) }}
 									</Button>

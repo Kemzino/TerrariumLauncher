@@ -1546,8 +1546,8 @@ const disabledModGroups = ref<string[]>([])
 async function refreshModGroups() {
 	if (!instance.value) return
 	const groups = await terrarium_list_mod_groups(instance.value.id).catch(() => [])
-	modGroupNames.value = groups.map((group) => group.name)
-	disabledModGroups.value = groups.filter((group) => !group.enabled).map((group) => group.name)
+	modGroupNames.value = groups.map((group) => group.path)
+	disabledModGroups.value = groups.filter((group) => !group.enabled).map((group) => group.path)
 }
 
 // Після зміни груп бекенд емітить `synced` → обробник нижче запускає свій

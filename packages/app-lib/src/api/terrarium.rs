@@ -1097,7 +1097,7 @@ pub async fn publish_preview(
         let file_name = path.rsplit('/').next().unwrap_or(&path).to_string();
         let folder = path.split('/').next().unwrap_or("").to_string();
         let pack_path = commands::flat_path(&path);
-        let group = commands::group_of(&path).map(str::to_string);
+        let group = commands::group_of(&path);
         seen.insert(pack_path.clone());
         let in_release = release_files.contains_key(&pack_path);
         // Порівнюємо вміст лише з тим, що в релізі лежить файлом (overrides);
