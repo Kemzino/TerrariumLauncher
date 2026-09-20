@@ -8,6 +8,9 @@ export const TERRARIUM_LINKS = {
 	github: 'https://github.com/Kemzino/TerrariumLauncher',
 } as const
 
+/** Адреса ігрового сервера (SRV → порт резолвиться так само, як у грі). */
+export const TERRARIUM_SERVER_ADDRESS = 'create.terrariumworlds.fun'
+
 export function openTerrariumLink(key: keyof typeof TERRARIUM_LINKS) {
 	void openUrl(TERRARIUM_LINKS[key])
 }
