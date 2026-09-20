@@ -11443,6 +11443,7 @@ dependencies = [
  "core-graphics",
  "daedalus",
  "dashmap",
+ "dirs",
  "either",
  "enumset",
  "hyper 1.7.0",
@@ -11477,6 +11478,7 @@ dependencies = [
  "webview2-com",
  "windows",
  "windows-core 0.61.2",
+ "winreg 0.55.0",
 ]
 
 [[package]]
