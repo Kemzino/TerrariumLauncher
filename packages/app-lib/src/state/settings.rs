@@ -88,6 +88,9 @@ pub enum FeatureFlag {
     FriendsPendingCollapsed,
     DismissedPhotosensitivityFilterWarning,
     LocalhostSignIn,
+    // Terrarium: віджети на головній
+    TerrariumShowNews,
+    TerrariumShowServerStatus,
 }
 
 impl Settings {

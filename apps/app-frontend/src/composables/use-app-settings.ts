@@ -24,6 +24,9 @@ export const DEFAULT_FEATURE_FLAGS = {
 	friends_pending_collapsed: true,
 	dismissed_photosensitivity_filter_warning: false,
 	localhost_sign_in: false,
+	// Terrarium: віджети на головній (самі віджети — пізніше; поки лише перемикачі)
+	terrarium_show_news: true,
+	terrarium_show_server_status: true,
 }
 
 export type FeatureFlag = keyof typeof DEFAULT_FEATURE_FLAGS

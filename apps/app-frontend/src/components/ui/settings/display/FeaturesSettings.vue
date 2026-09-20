@@ -43,6 +43,8 @@ const quickInstances = useQuickInstanceLimit()
 const queryClient = useQueryClient()
 
 const showJumpInFlag: FeatureFlag = 'worlds_in_home'
+const showNewsFlag: FeatureFlag = 'terrarium_show_news'
+const showServerStatusFlag: FeatureFlag = 'terrarium_show_server_status'
 
 const messages = defineMessages({
 	syncAcrossDevicesTitle: {
@@ -116,6 +118,27 @@ const messages = defineMessages({
 		id: 'app.features-settings.show-jump-in.description',
 		defaultMessage: 'Show recently played worlds and instances at the top of the Play page.',
 	},
+	terrariumTitle: {
+		id: 'app.features-settings.terrarium.title',
+		defaultMessage: 'Головна Terrarium',
+	},
+	showNewsTitle: {
+		id: 'app.features-settings.terrarium-news.title',
+		defaultMessage: 'Показувати новини',
+	},
+	showNewsDescription: {
+		id: 'app.features-settings.terrarium-news.description',
+		defaultMessage: 'Стрічка новин спільноти з Discord на головній сторінці.',
+	},
+	showServerStatusTitle: {
+		id: 'app.features-settings.terrarium-server-status.title',
+		defaultMessage: 'Показувати онлайн сервера',
+	},
+	showServerStatusDescription: {
+		id: 'app.features-settings.terrarium-server-status.description',
+		defaultMessage:
+			'Скільки гравців зараз на сервері; блок розкривається у список тих, хто онлайн.',
+	},
 })
 
 type FeaturesSettingsState = {
@@ -127,6 +150,8 @@ type FeaturesSettingsState = {
 	showSkinSelector: boolean
 	quickInstanceCount: number
 	showJumpIn: boolean
+	showNews: boolean
+	showServerStatus: boolean
 }
 
 const settingsQuery = useQuery(appSettingsQueryOptions())
@@ -146,6 +171,9 @@ function getFeaturesSettingsState(
 		showSkinSelector: settings.show_skin_selector_in_sidebar,
 		quickInstanceCount: quickInstances.limit.value ?? QUICK_INSTANCE_LIMIT_MAX,
 		showJumpIn: settings.feature_flags[showJumpInFlag] ?? DEFAULT_FEATURE_FLAGS[showJumpInFlag],
+		showNews: settings.feature_flags[showNewsFlag] ?? DEFAULT_FEATURE_FLAGS[showNewsFlag],
+		showServerStatus:
+			settings.feature_flags[showServerStatusFlag] ?? DEFAULT_FEATURE_FLAGS[showServerStatusFlag],
 	}
 }
 
@@ -184,6 +212,8 @@ const settingsMutation = useMutation({
 			feature_flags: {
 				...latestSettings.feature_flags,
 				[showJumpInFlag]: value.showJumpIn,
+				[showNewsFlag]: value.showNews,
+				[showServerStatusFlag]: value.showServerStatus,
 			},
 		}
 
@@ -206,6 +236,8 @@ const settingsMutation = useMutation({
 		appSettings.showScreenshotsTabInInstances = value.showScreenshotsTab
 		appSettings.showSkinSelectorInSidebar = value.showSkinSelector
 		appSettings.featureFlags[showJumpInFlag] = value.showJumpIn
+		appSettings.featureFlags[showNewsFlag] = value.showNews
+		appSettings.featureFlags[showServerStatusFlag] = value.showServerStatus
 
 		if (updateQuickInstanceCount) {
 			quickInstances.setLimit(value.quickInstanceCount)
@@ -401,6 +433,41 @@ onBeforeUnmount(() => {
 				v-model="current.showJumpIn"
 				:aria-label="formatMessage(messages.showJumpInTitle)"
 			/>
+		</div>
+	</section>
+
+	<section class="mt-8 border-0 border-t border-solid border-surface-4 pt-6">
+		<h2 class="m-0 text-xl font-semibold text-contrast">
+			{{ formatMessage(messages.terrariumTitle) }}
+		</h2>
+		<div class="mt-4 flex flex-col gap-6">
+			<div class="flex items-center justify-between gap-4">
+				<div>
+					<h3 class="m-0 text-lg font-semibold text-contrast">
+						{{ formatMessage(messages.showNewsTitle) }}
+					</h3>
+					<p class="m-0 mt-1">{{ formatMessage(messages.showNewsDescription) }}</p>
+				</div>
+				<Toggle
+					id="terrarium-show-news"
+					v-model="current.showNews"
+					:aria-label="formatMessage(messages.showNewsTitle)"
+				/>
+			</div>
+
+			<div class="flex items-center justify-between gap-4">
+				<div>
+					<h3 class="m-0 text-lg font-semibold text-contrast">
+						{{ formatMessage(messages.showServerStatusTitle) }}
+					</h3>
+					<p class="m-0 mt-1">{{ formatMessage(messages.showServerStatusDescription) }}</p>
+				</div>
+				<Toggle
+					id="terrarium-show-server-status"
+					v-model="current.showServerStatus"
+					:aria-label="formatMessage(messages.showServerStatusTitle)"
+				/>
+			</div>
 		</div>
 	</section>
 </template>
