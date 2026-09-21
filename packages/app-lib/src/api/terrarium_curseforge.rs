@@ -429,18 +429,25 @@ fn find_update(
 
 /// Для файлів, яких нема на Modrinth, — картка з CurseForge за sha1 файлу.
 /// Ніколи не падає: без ключа чи мережі повертає порожню мапу.
+/// `known_project_ids` — проєкти Modrinth, які справді знайшлись за
+/// метаданими файлів. Файл, чий кешований збіг хеш→проєкт веде на проєкт,
+/// якого на Modrinth уже нема (знято з публікації, відхилено модерацією),
+/// інакше показувався б як «просто файл», хоч на CurseForge він є.
 pub(crate) async fn resolve_curseforge_content(
     instance_dir: &Path,
     game_version: &str,
     loader: ModLoader,
     files: &[(String, ContentFile)],
+    known_project_ids: &HashSet<String>,
     cache_behaviour: Option<CacheBehaviour>,
     state: &State,
 ) -> HashMap<String, CurseForgeContent> {
     let candidates: Vec<(&str, &str)> = files
         .iter()
         .filter(|(_, file)| {
-            file.metadata.is_none()
+            file.metadata
+                .as_ref()
+                .is_none_or(|m| !known_project_ids.contains(&m.project_id))
                 && matches!(
                     file.project_type,
                     ProjectType::Mod

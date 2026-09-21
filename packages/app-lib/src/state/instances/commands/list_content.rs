@@ -931,13 +931,20 @@ async fn content_files_to_content_items(
         )
         .await?;
     let instance_path = state.directories.instances_dir().join(&instance.path);
-    // Terrarium: файли не з Modrinth — пробуємо впізнати на CurseForge
+    // Terrarium: файли не з Modrinth (або чий проєкт Modrinth уже не
+    // знаходиться) — пробуємо впізнати на CurseForge
+    let known_project_ids = meta
+        .projects
+        .iter()
+        .map(|project| project.id.clone())
+        .collect::<HashSet<_>>();
     let curseforge =
         crate::api::terrarium_curseforge::resolve_curseforge_content(
             &instance_path,
             &content_set.game_version,
             loader,
             files,
+            &known_project_ids,
             cache_behaviour,
             state,
         )
