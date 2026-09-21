@@ -144,20 +144,22 @@ jobs:
       - name: Setup pnpm
         run: corepack enable
 
-      # node_modules цілком, а не лише store: pnpm install зі store все одно
-      # займав ~70 с на лінкування; з готовими node_modules — секунди.
-      # pnpm install запускаємо завжди: відновлений кеш буває неповним
-      # (v1.0.4 — нема typescript/unplugin, EPERM на джанкшенах у .pnpm),
-      # а з цілими node_modules install лише звіряє lock і закінчується за секунди.
-      - name: Cache node_modules
-        id: node-modules-cache
+      # Кешуємо pnpm store, а не node_modules: на Windows node_modules після
+      # tar відновлюється битим (джанкшени в .pnpm дають EPERM, зникають
+      # пакети — так упали збірки v1.0.4 і v1.0.5), а `pnpm install` на ньому
+      # каже «Already up to date» і нічого не лагодить. Зі store лінкування
+      # чистих node_modules займає ~1 хв — прийнятно за надійність.
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
         uses: actions/cache@v4
         with:
-          path: |
-            node_modules
-            apps/*/node_modules
-            packages/*/node_modules
-          key: node-modules-v2-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
