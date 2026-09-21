@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RefreshCwIcon, ServerIcon, UsersIcon } from '@modrinth/assets'
+import { RefreshCwIcon, UsersIcon } from '@modrinth/assets'
 import { Button, defineMessages, useVIntl } from '@modrinth/ui'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
@@ -12,7 +12,6 @@ const REFRESH_MS = 60_000
 const { formatMessage } = useVIntl()
 
 const messages = defineMessages({
-	title: { id: 'terrarium.server-status.title', defaultMessage: 'Сервер' },
 	checking: { id: 'terrarium.server-status.checking', defaultMessage: 'Перевіряю…' },
 	online: { id: 'terrarium.server-status.online', defaultMessage: 'Онлайн: {players} / {max}' },
 	offline: { id: 'terrarium.server-status.offline', defaultMessage: 'Сервер недоступний' },
@@ -49,59 +48,63 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<section class="terrarium-widget">
-		<header class="terrarium-widget__head">
-			<h3 class="terrarium-widget__title"><ServerIcon /> {{ formatMessage(messages.title) }}</h3>
-			<span class="flex items-center gap-1">
-				<span
-					v-if="online !== null"
-					class="terrarium-status__dot"
-					:class="online ? 'is-online' : 'is-offline'"
-					aria-hidden="true"
-				/>
-				<Button
-					v-tooltip="formatMessage(messages.refresh)"
-					type="transparent"
-					size="sm"
-					icon-only
-					:disabled="loading"
-					:aria-label="formatMessage(messages.refresh)"
-					@click="refresh"
-				>
-					<RefreshCwIcon :class="{ 'animate-spin': loading }" />
-				</Button>
+	<!-- Один рядок без заголовка: стан · онлайн · пінг · оновити -->
+	<section class="terrarium-widget terrarium-status">
+		<span
+			class="terrarium-status__dot"
+			:class="{ 'is-online': online === true, 'is-offline': online === false }"
+			aria-hidden="true"
+		/>
+		<p v-if="online === null" class="terrarium-status__text text-secondary">
+			{{ formatMessage(messages.checking) }}
+		</p>
+		<p v-else-if="online && status?.players" class="terrarium-status__text text-contrast">
+			<UsersIcon class="text-brand" />
+			<span class="truncate">
+				{{
+					formatMessage(messages.online, {
+						players: status.players.online,
+						max: status.players.max,
+					})
+				}}
 			</span>
-		</header>
-		<div class="terrarium-widget__body">
-			<p v-if="online === null" class="m-0 text-sm text-secondary">
-				{{ formatMessage(messages.checking) }}
-			</p>
-			<template v-else-if="online && status?.players">
-				<p class="m-0 flex items-center gap-2 font-semibold text-contrast">
-					<UsersIcon class="text-brand" />
-					{{
-						formatMessage(messages.online, {
-							players: status.players.online,
-							max: status.players.max,
-						})
-					}}
-					<span v-if="status.ping !== undefined" class="terrarium-status__ping">
-						{{ formatMessage(messages.ping, { ping: status.ping }) }}
-					</span>
-				</p>
-			</template>
-			<p v-else class="m-0 text-secondary">{{ formatMessage(messages.offline) }}</p>
-		</div>
+			<span v-if="status.ping !== undefined" class="terrarium-status__ping">
+				{{ formatMessage(messages.ping, { ping: status.ping }) }}
+			</span>
+		</p>
+		<p v-else class="terrarium-status__text text-secondary">
+			{{ formatMessage(messages.offline) }}
+		</p>
+		<Button
+			v-tooltip="formatMessage(messages.refresh)"
+			type="transparent"
+			size="sm"
+			icon-only
+			:disabled="loading"
+			:aria-label="formatMessage(messages.refresh)"
+			@click="refresh"
+		>
+			<RefreshCwIcon :class="{ 'animate-spin': loading }" />
+		</Button>
 	</section>
 </template>
 
 <style scoped lang="scss">
 @use './terrarium-widget' as *;
 
+.terrarium-status {
+	flex-direction: row;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.4rem 0.5rem 0.4rem 0.9rem;
+}
+
 .terrarium-status__dot {
+	flex-shrink: 0;
 	width: 0.6rem;
 	height: 0.6rem;
 	border-radius: 999px;
+	background: var(--color-secondary);
 
 	&.is-online {
 		background: var(--color-green);
@@ -109,6 +112,23 @@ onBeforeUnmount(() => {
 
 	&.is-offline {
 		background: var(--color-red);
+	}
+}
+
+.terrarium-status__text {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+	align-items: center;
+	gap: 0.4rem;
+	margin: 0;
+	font-size: 0.9rem;
+	font-weight: 600;
+
+	svg {
+		flex-shrink: 0;
+		width: 1rem;
+		height: 1rem;
 	}
 }
 

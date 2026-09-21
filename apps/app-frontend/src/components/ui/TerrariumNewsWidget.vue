@@ -188,7 +188,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<section class="terrarium-widget">
+	<section class="terrarium-widget terrarium-news">
 		<header class="terrarium-widget__head">
 			<h3 class="terrarium-widget__title"><DiscordIcon /> {{ formatMessage(messages.title) }}</h3>
 			<span class="flex items-center gap-1">
@@ -218,7 +218,7 @@ onBeforeUnmount(() => {
 			</span>
 		</header>
 
-		<div v-show="!collapsed" class="terrarium-widget__body">
+		<div v-show="!collapsed" class="terrarium-widget__body terrarium-news__body">
 			<div v-if="channels.length" class="terrarium-news__tabs" role="tablist">
 				<button
 					v-for="channel in channels"
@@ -366,13 +366,35 @@ onBeforeUnmount(() => {
 	}
 }
 
+// Висота віджета задається зовні (колонка hero тягнеться по вікну):
+// тіло й список — гнучкі, скрол лише всередині списку
+.terrarium-news {
+	min-height: 0;
+}
+
+.terrarium-news__body {
+	display: flex;
+	flex: 1 1 auto;
+	min-height: 0;
+	flex-direction: column;
+}
+
 .terrarium-news__list {
 	display: flex;
+	flex: 1 1 auto;
 	flex-direction: column;
 	gap: 0.75rem;
+	min-height: 6rem;
 	max-height: 22rem;
 	overflow-y: auto;
 	padding-right: 0.25rem;
+}
+
+// Поза вузьким режимом верхня межа — доступна висота колонки, не 22rem
+@media (min-width: 961px) {
+	.terrarium-news__list {
+		max-height: none;
+	}
 }
 
 .terrarium-news__open {

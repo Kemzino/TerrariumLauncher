@@ -913,7 +913,10 @@ onMounted(async () => {
 	position: relative;
 	min-height: 100%;
 	display: flex;
-	align-items: flex-end;
+	// stretch, а не flex-end: контент отримує висоту hero, щоб права колонка
+	// (новини) могла розтягнутись на весь перший екран; головна частина
+	// притискається до низу вже всередині сітки (align-items: end)
+	align-items: stretch;
 	overflow: hidden;
 }
 
@@ -1160,6 +1163,13 @@ onMounted(async () => {
 	align-items: flex-end;
 	justify-content: flex-end;
 	gap: 0.75rem;
+	// На всю висоту hero, але без внеску у неї: height: 0 — колонка не
+	// розтягує hero під довгий список новин, min-height: 100% — після
+	// розкладки займає всю висоту рядка сітки. Новини між сервером і акаунтом
+	// беруть решту місця і скролять усередині.
+	align-self: stretch;
+	height: 0;
+	min-height: 100%;
 }
 
 .terrarium-hero__social {
@@ -1228,8 +1238,18 @@ onMounted(async () => {
 .terrarium-hero__panels {
 	display: flex;
 	flex-direction: column;
+	justify-content: flex-end;
 	gap: 0.75rem;
 	width: 300px;
+	align-self: stretch;
+	min-height: 0;
+}
+
+// Новини — єдиний гнучкий віджет колонки: тягнуться по висоті вікна,
+// а довгий список скролиться всередині (див. TerrariumNewsWidget)
+.terrarium-hero__panels > :deep(.terrarium-news) {
+	flex: 0 1 auto;
+	min-height: 0;
 }
 
 // Віджети в hero — у тому ж «скляному» стилі, що й картка акаунта
@@ -1263,6 +1283,21 @@ onMounted(async () => {
 	.terrarium-hero__content {
 		grid-template-columns: 1fr;
 		padding: 2rem 1.5rem;
+	}
+
+	// В одну колонку розтягувати нема куди — новини знову фіксованої висоти
+	.terrarium-hero__side {
+		height: auto;
+		min-height: 0;
+	}
+
+	.terrarium-hero__side,
+	.terrarium-hero__panels {
+		align-self: auto;
+	}
+
+	.terrarium-hero__panels > :deep(.terrarium-news) {
+		flex: none;
 	}
 }
 </style>
