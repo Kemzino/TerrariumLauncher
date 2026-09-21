@@ -1,4 +1,5 @@
 import type { Labrinth } from '@modrinth/api-client'
+import type { Component } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 
 import type { ButtonMenuOption } from '#ui/components/base/buttons'
@@ -25,6 +26,8 @@ export interface ContentOwner {
 export interface ContentSource {
 	project: ContentCardProject
 	link?: string | RouteLocationRaw | (() => void)
+	/** Замість аватарки проєкту — іконка платформи (Terrarium: CurseForge) */
+	icon?: Component
 }
 
 export type ClientWarningType = 'retained' | 'depends' | 'environment'
@@ -115,6 +118,29 @@ export interface ContentItem extends Omit<
 	external?: boolean
 	external_url?: string
 	embedded_metadata?: EmbeddedContentMetadata | null
+	/** Terrarium: мод упізнано на CurseForge (лише коли нема картки Modrinth) */
+	curseforge?: CurseForgeContent | null
+}
+
+/** Terrarium: картка мода з CurseForge (див. app-lib `CurseForgeContent`). */
+export interface CurseForgeContent {
+	mod_id: number
+	name: string
+	slug: string
+	url: string
+	icon_url?: string | null
+	author?: string | null
+	author_url?: string | null
+	file_id: number
+	file_name: string
+	display_name: string
+	update?: CurseForgeUpdate | null
+}
+
+export interface CurseForgeUpdate {
+	file_id: number
+	file_name: string
+	url: string
 }
 
 export type ManagedContentProject = Pick<

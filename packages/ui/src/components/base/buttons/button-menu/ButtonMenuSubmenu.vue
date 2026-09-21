@@ -14,6 +14,7 @@ import {
 	getButtonMenuItemAttrs,
 	isDivider,
 	isHeading,
+	isSubmenu,
 	menuItemSelector,
 	menuPanelPadding,
 	submenuGap,
@@ -31,6 +32,8 @@ const props = withDefaults(
 		option: ButtonMenuSubmenu
 		placement?: TeleportPlacement
 		distance?: number
+		/** Підменю всередині іншого підменю (не пункт верхнього рівня) */
+		nested?: boolean
 	}>(),
 	{
 		placement: 'right-start',
@@ -51,7 +54,11 @@ const alignOffset = ref(-menuPanelPadding)
 const panelId = `button-menu-submenu-${useId()}`
 
 const options = computed(() => visibleOptions(props.option.options))
-const triggerAttrs = computed(() => getButtonMenuItemAttrs(props.option))
+const triggerAttrs = computed(() => ({
+	...getButtonMenuItemAttrs(props.option),
+	// верхнє меню пропускає такі пункти при навігації з клавіатури
+	'data-button-menu-submenu-item': props.nested || undefined,
+}))
 
 const { isOpen, panelStyle, resolvedSide, expandOrigin, open, close } = useAnchoredTeleport(
 	triggerElement,
@@ -176,6 +183,21 @@ function handlePanelKeydown(event: KeyboardEvent) {
 			>
 				{{ child.label }}
 			</div>
+
+			<ButtonMenuSubmenu v-else-if="isSubmenu(child)" :option="child" nested @select="handleSelect">
+				<template #trigger="{ option: nestedOption }">
+					<slot name="item" :option="nestedOption">
+						<component :is="nestedOption.icon" v-if="nestedOption.icon" aria-hidden="true" />
+						{{ nestedOption.label }}
+					</slot>
+				</template>
+				<template #item="{ option: nestedChild }">
+					<slot name="item" :option="nestedChild">
+						<component :is="nestedChild.icon" v-if="nestedChild.icon" aria-hidden="true" />
+						{{ nestedChild.label }}
+					</slot>
+				</template>
+			</ButtonMenuSubmenu>
 
 			<ButtonMenuItem v-else :option="child" submenu-item @select="handleSelect">
 				<slot name="item" :option="child">

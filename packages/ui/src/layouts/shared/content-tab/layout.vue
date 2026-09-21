@@ -15,7 +15,9 @@ import {
 	FolderIcon,
 	FolderOpenIcon,
 	FolderUpIcon,
+	LayoutGridIcon,
 	LinkIcon,
+	ListIcon,
 	OrganizationIcon,
 	PencilIcon,
 	PlusIcon,
@@ -26,13 +28,13 @@ import {
 	TrashIcon,
 	UserIcon,
 } from '@modrinth/assets'
-import { useSessionStorage } from '@vueuse/core'
+import { useLocalStorage, useSessionStorage } from '@vueuse/core'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import Avatar from '#ui/components/base/Avatar.vue'
 import {
 	Button,
-	type ButtonMenuLeafOption,
+	type ButtonMenuAction,
 	type ButtonMenuOption,
 	TeleportOverflowMenu,
 } from '#ui/components/base/buttons'
@@ -45,6 +47,7 @@ import { useDebugLogger } from '#ui/composables/debug-logger'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { commonMessages, formatContentTypeSentence } from '#ui/utils/common-messages'
 
+import ContentCardGrid from './components/ContentCardGrid.vue'
 import ContentCardTable from './components/ContentCardTable.vue'
 import ContentSelectionBar from './components/ContentSelectionBar.vue'
 import ManagedContentCard from './components/managed-content-card/index.vue'
@@ -86,6 +89,13 @@ const props = withDefaults(
 
 const messages = defineMessages({
 	groupUngrouped: { id: 'content.mod-groups.ungrouped', defaultMessage: 'Без групи' },
+	groupViewOn: { id: 'content.mod-groups.view-on', defaultMessage: 'Показувати групами' },
+	groupViewOff: {
+		id: 'content.mod-groups.view-off',
+		defaultMessage: 'Показувати одним списком (без груп)',
+	},
+	viewList: { id: 'content.view.list', defaultMessage: 'Список' },
+	viewGrid: { id: 'content.view.grid', defaultMessage: 'Сітка' },
 	groupNew: { id: 'content.mod-groups.new', defaultMessage: 'Нова група' },
 	groupNewSub: { id: 'content.mod-groups.new-sub', defaultMessage: 'Нова підгрупа' },
 	groupRename: { id: 'content.mod-groups.rename', defaultMessage: 'Перейменувати' },
@@ -100,6 +110,7 @@ const messages = defineMessages({
 		defaultMessage: 'Моди перемістяться в корінь mods/, папка зникне',
 	},
 	groupMoveTo: { id: 'content.mod-groups.move-to', defaultMessage: 'У групу' },
+	groupMoveHere: { id: 'content.mod-groups.move-here', defaultMessage: 'У «{name}»' },
 	groupRemoveFrom: { id: 'content.mod-groups.remove-from', defaultMessage: 'Прибрати з групи' },
 	groupEmpty: { id: 'content.mod-groups.empty', defaultMessage: 'Порожня група' },
 	groupShowEmpty: {
@@ -522,6 +533,17 @@ const tableItems = computed<ContentCardTableItem[]>(() => {
 
 // Terrarium: групи модів (підпапки mods/<Група>/) як акордеони
 const modGroups = ctx.modGroups
+// Terrarium: вигляд списку — рядки чи щільна сітка; і чи розкладати по групах.
+// Один плоский список зручніший, коли працюють фільтри/пошук: усе знайдене
+// поруч, без порожніх акордеонів. Запам'ятовується на цьому пристрої.
+type ContentViewMode = 'list' | 'grid'
+const viewMode = ctx.filterPersistKey
+	? useLocalStorage<ContentViewMode>(`content-view:${ctx.filterPersistKey}`, 'list')
+	: ref<ContentViewMode>('list')
+const groupView = ctx.filterPersistKey
+	? useLocalStorage<boolean>(`content-group-view:${ctx.filterPersistKey}`, true)
+	: ref(true)
+const showGroupedSections = computed(() => !!modGroups && groupView.value)
 const modGroupNameModal = ref<InstanceType<typeof ModGroupNameModal>>()
 const collapsedGroups = ctx.filterPersistKey
 	? useSessionStorage<Record<string, boolean>>(
@@ -547,6 +569,13 @@ interface GroupedSection {
 	totalItems: number
 }
 
+interface GroupNode {
+	name: string
+	displayName: string
+	depth: number
+	parent: string | null
+}
+
 function groupParent(path: string): string | null {
 	const i = path.lastIndexOf('/')
 	return i === -1 ? null : path.slice(0, i)
@@ -554,6 +583,47 @@ function groupParent(path: string): string | null {
 function groupDisplayName(path: string) {
 	return path.slice(path.lastIndexOf('/') + 1)
 }
+
+/**
+ * Дерево груп, розгорнуте в список у порядку обходу: батько, потім його діти
+ * за абеткою. Проміжні рівні (`A` для `A/B`), яких немає у вхідному переліку,
+ * додаються.
+ */
+function orderGroupTree(names: Iterable<string>): GroupNode[] {
+	const all = new Set<string>()
+	for (const name of names) {
+		let current: string | null = name
+		while (current !== null && !all.has(current)) {
+			all.add(current)
+			current = groupParent(current)
+		}
+	}
+	const children = new Map<string | null, string[]>()
+	for (const name of all) {
+		const parent = groupParent(name)
+		if (!children.has(parent)) children.set(parent, [])
+		children.get(parent)!.push(name)
+	}
+	const byName = (a: string, b: string) =>
+		groupDisplayName(a).localeCompare(groupDisplayName(b), undefined, { sensitivity: 'base' })
+	const out: GroupNode[] = []
+	const visit = (parent: string | null, depth: number) => {
+		for (const name of (children.get(parent) ?? []).sort(byName)) {
+			out.push({ name, displayName: groupDisplayName(name), depth, parent })
+			visit(name, depth + 1)
+		}
+	}
+	visit(null, 0)
+	return out
+}
+
+// Меню «У групу» будується всередині tableItems (overflowOptions кожного рядка),
+// тож воно НЕ може залежати від allGroupedSections (той читає tableItems) —
+// інакше два computed крутять один одного по колу і вкладка зависає.
+// Тому дерево для меню — лише з переліку груп бекенду.
+const groupMenuTree = computed<GroupNode[]>(() =>
+	modGroups ? orderGroupTree(modGroups.groups.value) : [],
+)
 
 const allGroupedSections = computed<GroupedSection[]>(() => {
 	if (!modGroups) return []
@@ -567,23 +637,13 @@ const allGroupedSections = computed<GroupedSection[]>(() => {
 		if (!buckets.has(group)) buckets.set(group, [])
 		buckets.get(group)!.push(row)
 	}
-	// Проміжні рівні (`A` для `A/B`), яких бекенд не повернув, — теж секції
-	for (const name of [...buckets.keys()]) {
-		let parent = name === null ? null : groupParent(name)
-		while (parent !== null) {
-			if (!buckets.has(parent)) buckets.set(parent, [])
-			parent = groupParent(parent)
-		}
+	const tree = orderGroupTree([...buckets.keys()].filter((name): name is string => name !== null))
+	const children = new Map<string, string[]>()
+	for (const node of tree) {
+		if (node.parent === null) continue
+		if (!children.has(node.parent)) children.set(node.parent, [])
+		children.get(node.parent)!.push(node.name)
 	}
-	const children = new Map<string | null, string[]>()
-	for (const name of buckets.keys()) {
-		if (name === null) continue
-		const parent = groupParent(name)
-		if (!children.has(parent)) children.set(parent, [])
-		children.get(parent)!.push(name)
-	}
-	const byName = (a: string, b: string) =>
-		groupDisplayName(a).localeCompare(groupDisplayName(b), undefined, { sensitivity: 'base' })
 	const totals = new Map<string, number>()
 	const total = (name: string): number => {
 		if (totals.has(name)) return totals.get(name)!
@@ -593,24 +653,20 @@ const allGroupedSections = computed<GroupedSection[]>(() => {
 		return own + sub
 	}
 	const sections: GroupedSection[] = []
-	const visit = (parent: string | null, depth: number) => {
-		for (const name of (children.get(parent) ?? []).sort(byName)) {
-			const items = buckets.get(name) ?? []
-			// Порожні гілки ховаємо лише коли активний пошук — щоб не заважали
-			if (total(name) === 0 && searchQuery.value) continue
-			sections.push({
-				key: name,
-				name,
-				displayName: groupDisplayName(name),
-				depth,
-				parent,
-				items,
-				totalItems: total(name),
-			})
-			visit(name, depth + 1)
-		}
+	for (const node of tree) {
+		// Порожні гілки ховаємо лише коли активний пошук — щоб не заважали
+		// (у порожнього батька всі нащадки теж порожні, тож зникає вся гілка)
+		if (total(node.name) === 0 && searchQuery.value) continue
+		sections.push({
+			key: node.name,
+			name: node.name,
+			displayName: node.displayName,
+			depth: node.depth,
+			parent: node.parent,
+			items: buckets.get(node.name) ?? [],
+			totalItems: total(node.name),
+		})
 	}
-	visit(null, 0)
 	sections.push({
 		key: UNGROUPED_KEY,
 		name: null,
@@ -682,17 +738,43 @@ const groupableSelectedItems = computed(() =>
 	modGroups ? selectedItems.value.filter((item) => modGroups.canGroup(item)) : [],
 )
 
-function groupMoveOptions(targets: () => ContentItem[]): ButtonMenuLeafOption[] {
+function groupMoveOptions(targets: () => ContentItem[]): ButtonMenuOption[] {
 	if (!modGroups) return []
-	// Групи деревом: відступ за глибиною, порядок як у списку
-	const options: ButtonMenuLeafOption[] = allGroupedSections.value
-		.filter((s) => s.name !== null)
-		.map((s) => ({
-			id: `group:${s.name}`,
-			label: `${'\u2003'.repeat(s.depth)}${s.displayName}`,
+	// Де зараз лежать цілі: одна спільна група → позначаємо її галочкою і
+	// не даємо «перемістити» туди ж; різні групи → нічого не позначаємо
+	const currentGroups = new Set(targets().map((item) => modGroups.groupOf(item)))
+	const current = currentGroups.size === 1 ? [...currentGroups][0] : undefined
+	const tree = groupMenuTree.value
+	const childrenOf = (parent: string | null) => tree.filter((node) => node.parent === parent)
+	const moveTo = (node: GroupNode): ButtonMenuAction => ({
+		id: `group:${node.name}`,
+		label: node.displayName,
+		icon: FolderIcon,
+		selected: node.name === current ? true : undefined,
+		disabled: node.name === current,
+		action: () => void modGroups.move(targets(), node.name),
+	})
+	// Група з підгрупами — підменю, що розкривається: перший пункт — сама
+	// група, далі її підгрупи (теж підменю, якщо в них є свої)
+	const entry = (node: GroupNode): ButtonMenuOption => {
+		const children = childrenOf(node.name)
+		if (children.length === 0) return moveTo(node)
+		return {
+			type: 'submenu',
+			id: `group-branch:${node.name}`,
+			label: node.displayName,
 			icon: FolderIcon,
-			action: () => void modGroups.move(targets(), s.name),
-		}))
+			options: [
+				{
+					...moveTo(node),
+					label: formatMessage(messages.groupMoveHere, { name: node.displayName }),
+				},
+				{ type: 'divider' },
+				...children.map(entry),
+			],
+		}
+	}
+	const options: ButtonMenuOption[] = childrenOf(null).map(entry)
 	options.push(
 		{
 			id: 'group:new',
@@ -706,11 +788,13 @@ function groupMoveOptions(targets: () => ContentItem[]): ButtonMenuLeafOption[] 
 				})
 			},
 		},
-		{ type: 'divider' },
+		{ type: 'divider', shown: current !== null },
 		{
 			id: 'group:none',
 			label: formatMessage(messages.groupRemoveFrom),
 			icon: FolderUpIcon,
+			// Ховаємо, коли всі цілі й так без групи
+			shown: current !== null,
 			action: () => void modGroups.move(targets(), null),
 		},
 	)
@@ -751,8 +835,15 @@ function draggableItemsFor(id: string): ContentItem[] {
 function onTablePointerDown(event: PointerEvent) {
 	if (!modGroups || event.button !== 0 || pendingDrag) return
 	const target = event.target as HTMLElement | null
-	// Кнопки, чекбокси, посилання й меню всередині рядка працюють як раніше
-	if (!target || target.closest('button, a, input, label, [role="menu"], [role="menuitem"]')) return
+	// Кнопки, чекбокси, посилання й меню всередині рядка працюють як раніше;
+	// текст (назва, автор, версія, ім'я файлу) — виділяється мишкою, а не тягне.
+	// Тягнути — за іконку мода чи порожнє місце рядка.
+	if (
+		!target ||
+		target.closest('button, a, input, label, [role="menu"], [role="menuitem"], [data-no-drag]')
+	) {
+		return
+	}
 	const row = target.closest<HTMLElement>('[data-drag-id]')
 	if (!row?.dataset.dragId) return
 	pendingDrag = { id: row.dataset.dragId, x: event.clientX, y: event.clientY }
@@ -834,18 +925,21 @@ function onTableClickCapture(event: MouseEvent) {
 onBeforeUnmount(cancelDrag)
 
 /** Те саме для панелі виділення: після переміщення знімаємо виділення. */
-function bulkGroupMoveOptions(): ButtonMenuLeafOption[] {
-	return groupMoveOptions(() => groupableSelectedItems.value).map((option) =>
-		option.type === 'divider' || option.type === 'heading' || !('action' in option)
-			? option
-			: {
-					...option,
-					action: async (event: MouseEvent) => {
-						await option.action(event)
-						clearSelection()
-					},
-				},
-	)
+function bulkGroupMoveOptions(): ButtonMenuOption[] {
+	const wrap = (option: ButtonMenuOption): ButtonMenuOption => {
+		if (option.type === 'submenu') return { ...option, options: option.options.map(wrap) }
+		if (option.type === 'divider' || option.type === 'heading' || !('action' in option)) {
+			return option
+		}
+		return {
+			...option,
+			action: async (event: MouseEvent) => {
+				await option.action(event)
+				clearSelection()
+			},
+		}
+	}
+	return groupMoveOptions(() => groupableSelectedItems.value).map(wrap)
 }
 
 const hasOutdatedProjects = computed(() => {
@@ -1616,6 +1710,43 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 							</div>
 
 							<div class="flex shrink-0 items-center gap-2">
+								<div class="flex items-center gap-1">
+									<Button
+										v-if="modGroups"
+										v-tooltip="
+											formatMessage(groupView ? messages.groupViewOff : messages.groupViewOn)
+										"
+										type="quiet"
+										icon-only
+										:aria-label="
+											formatMessage(groupView ? messages.groupViewOff : messages.groupViewOn)
+										"
+										:class="groupView ? '!text-brand' : '!text-secondary'"
+										@click="groupView = !groupView"
+									>
+										<FolderIcon />
+									</Button>
+									<Button
+										v-tooltip="formatMessage(messages.viewList)"
+										type="quiet"
+										icon-only
+										:aria-label="formatMessage(messages.viewList)"
+										:class="viewMode === 'list' ? '!text-brand' : '!text-secondary'"
+										@click="viewMode = 'list'"
+									>
+										<ListIcon />
+									</Button>
+									<Button
+										v-tooltip="formatMessage(messages.viewGrid)"
+										type="quiet"
+										icon-only
+										:aria-label="formatMessage(messages.viewGrid)"
+										:class="viewMode === 'grid' ? '!text-brand' : '!text-secondary'"
+										@click="viewMode = 'grid'"
+									>
+										<LayoutGridIcon />
+									</Button>
+								</div>
 								<Button
 									v-if="hasBulkUpdateSupport && hasOutdatedProjects"
 									v-tooltip="formatMessage(messages.updateAll)"
@@ -1641,7 +1772,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 							</div>
 						</div>
 
-						<template v-if="modGroups">
+						<template v-if="showGroupedSections">
 							<div class="mt-2 flex flex-col gap-3">
 								<section
 									v-for="section in groupedSections"
@@ -1721,8 +1852,17 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 											</Button>
 										</template>
 									</div>
-									<div v-show="!isGroupCollapsed(section.key)" class="px-2 pb-2">
-										<ContentCardTable
+									<!-- Батько без власних файлів, але з модами в підгрупах — без
+									     плашки «Порожня група»; дроп у нього працює через секцію -->
+									<div
+										v-show="
+											!isGroupCollapsed(section.key) &&
+											(section.items.length > 0 || section.totalItems === 0)
+										"
+										class="px-2 pb-2"
+									>
+										<component
+											:is="viewMode === 'grid' ? ContentCardGrid : ContentCardTable"
 											v-model:selected-ids="selectedIds"
 											:items="section.items"
 											:highlighted-item-id="highlightedItemId"
@@ -1748,7 +1888,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 													}}
 												</span>
 											</template>
-										</ContentCardTable>
+										</component>
 									</div>
 								</section>
 								<div class="flex flex-wrap items-center gap-2">
@@ -1773,6 +1913,22 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 								</div>
 							</div>
 						</template>
+						<ContentCardGrid
+							v-else-if="viewMode === 'grid'"
+							v-model:selected-ids="selectedIds"
+							class="mt-2"
+							:items="tableItems"
+							:highlighted-item-id="highlightedItemId"
+							:show-selection="true"
+							@update:enabled="handleToggleEnabledById"
+							@delete="handleDeleteById"
+							@update="handleUpdateById"
+							@switch-version="handleSwitchVersionById"
+						>
+							<template #empty>
+								<span>{{ formatMessage(messages.noContentFound) }}</span>
+							</template>
+						</ContentCardGrid>
 						<ContentCardTable
 							v-else
 							v-model:selected-ids="selectedIds"
@@ -2036,6 +2192,12 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 .mod-group__table :deep([data-drag-id]) {
 	cursor: grab;
 	touch-action: none;
+}
+
+/* Текст у рядку — звичайний курсор і виділення */
+.mod-group__table :deep([data-drag-id] [data-no-drag]) {
+	cursor: auto;
+	user-select: text;
 }
 </style>
 

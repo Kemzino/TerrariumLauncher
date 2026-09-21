@@ -33,6 +33,7 @@ import {
 
 import { getClientWarningType } from '../../composables/content-filtering'
 import type { ContentCardProject, ContentCardTableItem, ContentItem } from '../../types'
+import { curseforgeTableFields } from '../../utils/curseforge'
 import ContentCardTable from '../ContentCardTable.vue'
 import ContentSelectionBar from '../ContentSelectionBar.vue'
 
@@ -328,6 +329,8 @@ const tableItems = computed<ContentCardTableItem[]>(() =>
 		disabled:
 			props.actionDisabled || disabledIds.value.has(item.file_name) || item.installing === true,
 		disabledTooltip: props.actionDisabled ? props.actionDisabledTooltip : undefined,
+		// Terrarium: мод із CurseForge — іконка, посилання, бейдж звідти
+		...curseforgeTableFields(item),
 		overflowOptions: [
 			...(props.switchVersion && !item.locked && item.project?.id && item.version?.id
 				? [

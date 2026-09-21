@@ -31,7 +31,10 @@
 				:organization="organization"
 				:members="members"
 				:org-link="(slug) => `https://modrinth.com/organization/${slug}`"
-				:user-link="(username) => `/user/${encodeURIComponent(username)}`"
+				:user-link="
+					(username) =>
+						curseforgeAuthorLink(username) ?? `/user/${encodeURIComponent(username)}`
+				"
 				link-target="_blank"
 				:user-link-target="null"
 				class="project-sidebar-section"
@@ -40,7 +43,7 @@
 				:project="data"
 				:has-versions="versions.length > 0"
 				:link-target="`_blank`"
-				:hide-license="isServerProject"
+				:hide-license="isServerProject || !!curseforgeMeta"
 				:show-followers="isServerProject"
 				class="project-sidebar-section"
 			/>
@@ -68,6 +71,9 @@
 					@contextmenu.prevent.stop="handleRightClick"
 					@category="(category) => router.push(`${projectSearchUrl}?f=categories:${category}`)"
 				>
+					<template v-if="curseforgeMeta" #badges>
+						<CurseForgeBadge />
+					</template>
 					<template #actions>
 						<template v-if="isServerProject">
 							<Button
@@ -256,6 +262,7 @@ import {
 	commonMessages,
 	ContextMenu,
 	CreationFlowModal,
+	CurseForgeBadge,
 	defineMessages,
 	getTargetInstallPreferences,
 	IconButton,
@@ -298,7 +305,15 @@ import {
 	get_version_many,
 } from '@/helpers/cache.js'
 import {
+	curseforgeVersionId,
+	getCurseForgeMeta,
+	isCurseForgeProjectId,
+	loadCurseForgeProject,
+} from '@/helpers/curseforge'
+import {
 	get as getInstance,
+	get_content_items as getInstanceContentItems,
+	get_linked_modpack_content as getLinkedModpackContent,
 	get_projects as getInstanceProjects,
 	getInstanceIconUrl,
 	kill,
@@ -356,6 +371,10 @@ const messages = defineMessages({
 		defaultMessage: 'Project data could not be loaded.',
 	},
 	comingSoon: { id: 'app.project.coming-soon', defaultMessage: 'Coming soon' },
+	openOnCurseForge: {
+		id: 'app.project.open-on-curseforge',
+		defaultMessage: 'Відкрити на CurseForge',
+	},
 	backToBrowse: {
 		id: 'app.project.install-context.back-to-browse',
 		defaultMessage: 'Back to discover',
@@ -622,7 +641,9 @@ const projectHeaderMoreActions = computed(() => [
 	},
 	{
 		id: 'open-in-browser',
-		label: formatMessage(commonMessages.openInModrinthButton),
+		label: curseforgeMeta.value
+			? formatMessage(messages.openOnCurseForge)
+			: formatMessage(commonMessages.openInModrinthButton),
 		icon: ExternalIcon,
 		action: openProjectInBrowser,
 	},
@@ -634,9 +655,19 @@ const projectHeaderMoreActions = computed(() => [
 		label: formatMessage(commonMessages.reportButton),
 		icon: ReportIcon,
 		tone: 'red',
+		shown: !curseforgeMeta.value,
 		action: reportProject,
 	},
 ])
+// Terrarium: проєкт із CurseForge (сторінка та сама, лише значок і посилання інші)
+const curseforgeMeta = computed(() => getCurseForgeMeta(data.value))
+function curseforgeAuthorLink(username) {
+	const author = curseforgeMeta.value?.authors.find((a) => a.name === username)
+	if (!author) return null
+	return () => {
+		void openUrl(author.url ?? curseforgeMeta.value.url)
+	}
+}
 const projectSearchUrl = computed(
 	() => `/browse/${isServerProject.value ? 'server' : data.value?.project_type}`,
 )
@@ -687,6 +718,10 @@ function handleAddServerToInstance() {
 
 function openProjectInBrowser() {
 	if (!data.value) return
+	if (curseforgeMeta.value) {
+		void openUrl(curseforgeMeta.value.url)
+		return
+	}
 	const type = isServerProject.value ? 'project' : data.value.project_type
 	void openUrl(`https://modrinth.com/${type}/${data.value.slug}`)
 }
@@ -696,9 +731,58 @@ function reportProject() {
 	void openUrl(`https://modrinth.com/report?item=project&itemID=${data.value.id}`)
 }
 
+// Terrarium: проєкт із CurseForge — ті самі дані у формі Modrinth
+async function fetchCurseForgeProjectData(requestedId) {
+	const loaded = await loadCurseForgeProject(requestedId).catch(handleError)
+	if (String(route.params.id ?? '') !== requestedId) return
+	if (!loaded) {
+		handleError('Error loading project')
+		return
+	}
+	projectV3.value = null
+	data.value = loaded.project
+	projectBreadcrumbLabel.value = loaded.project.title
+	// Порядок з бекенду — за id файлу (новіші перші); дати на CF ненадійні
+	versions.value = loaded.versions
+	members.value = loaded.members
+	organization.value = null
+	;[categories.value, instance.value] = await Promise.all([
+		get_categories().catch(handleError),
+		route.query.i ? getInstance(route.query.i).catch(handleError) : Promise.resolve(),
+	])
+	if (String(route.params.id ?? '') !== requestedId) return
+	// Чи вже стоїть: за ID мода CurseForge серед умісту примірника
+	installed.value = false
+	installedVersion.value = null
+	if (route.query.i) {
+		const [own, pack] = await Promise.all([
+			getInstanceContentItems(route.query.i).catch(() => []),
+			getLinkedModpackContent(route.query.i).catch(() => []),
+		])
+		const items = [...own, ...pack]
+		// Той самий мод міг стояти з Modrinth (і як мод збірки) — впізнаємо за slug
+		const existing = items.find(
+			(item) =>
+				item.curseforge?.mod_id === loaded.mod.id || item.project?.slug === loaded.mod.slug,
+		)
+		if (existing) {
+			installed.value = true
+			installedVersion.value = existing.curseforge
+				? curseforgeVersionId(existing.curseforge.file_id)
+				: null
+		}
+	}
+	isServerProject.value = false
+	serverStatusOnline.value = false
+}
+
 async function fetchProjectData() {
 	const requestedId = String(route.params.id ?? '')
 	projectBreadcrumbLabel.value = getProjectBreadcrumbLabel(requestedId)
+	if (isCurseForgeProjectId(requestedId)) {
+		await fetchCurseForgeProjectData(requestedId)
+		return
+	}
 	const [project, projectV3Result] = await Promise.all([
 		get_project(requestedId, 'must_revalidate').catch(handleError),
 		get_project_v3(requestedId, 'must_revalidate').catch(handleError),

@@ -4,6 +4,7 @@ import { computed, ref } from 'vue'
 
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { useImageThumbnail } from '@/composables/use-image-thumbnail'
+import { useTerrariumState } from '@/composables/use-terrarium-state'
 import { getInstanceIconUrl } from '@/helpers/instance'
 import type { GameInstance } from '@/helpers/types'
 
@@ -34,6 +35,10 @@ const iconSrc = computed(() =>
 
 const nameRef = ref<HTMLElement | null>(null)
 const versionRef = ref<HTMLElement | null>(null)
+
+// Terrarium: примірник, обраний на головній (яким запускає «Грати»), — виділений
+const { activePackState } = useTerrariumState()
+const isActivePack = computed(() => activePackState.value.instance_id === props.instance.id)
 </script>
 
 <template>
@@ -44,9 +49,17 @@ const versionRef = ref<HTMLElement | null>(null)
 			'flex-col items-start justify-end gap-3 rounded-[20px] p-3': !compactMode,
 			'[border-color:color-mix(in_srgb,var(--color-text-primary)_40%,transparent)] brightness-110':
 				selected,
-			'border-surface-4': !selected,
+			'border-surface-4': !selected && !isActivePack,
+			'terrarium-active-pack': isActivePack && !selected,
 		}"
 	>
+		<span
+			v-if="isActivePack"
+			class="absolute z-[2] rounded-full bg-brand px-2 py-0.5 text-xs font-semibold text-brand-inverted"
+			:class="compactMode ? 'right-2 top-2' : 'left-5 top-5'"
+		>
+			Обрано
+		</span>
 		<div
 			class="relative flex shrink-0 items-center max-w-full overflow-clip"
 			:class="compactMode ? 'size-10 rounded-lg' : 'aspect-square min-w-full rounded-2xl'"
@@ -92,3 +105,11 @@ const versionRef = ref<HTMLElement | null>(null)
 		<slot name="overlay" :compact="compactMode" />
 	</div>
 </template>
+
+<style scoped>
+/* Terrarium: обрана на головній збірка */
+.terrarium-active-pack {
+	border-color: var(--color-brand);
+	box-shadow: 0 0 0 1px var(--color-brand) inset;
+}
+</style>

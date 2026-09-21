@@ -221,7 +221,7 @@ const installTooltip = computed(() => {
 						<SpinnerIcon v-else class="size-5 animate-spin text-white" />
 					</div>
 				</div>
-				<div class="flex min-w-0 flex-col gap-0.5">
+				<div class="flex min-w-0 flex-col gap-0.5" data-no-drag>
 					<div class="flex min-w-0 items-center gap-1">
 						<AutoLink
 							:target="
@@ -268,7 +268,14 @@ const installTooltip = computed(() => {
 								class="flex min-w-0 items-center gap-1 !decoration-secondary"
 								:class="{ 'hover:underline': source.link }"
 							>
+								<component
+									:is="source.icon"
+									v-if="source.icon"
+									class="size-5 shrink-0 text-secondary"
+									aria-hidden="true"
+								/>
 								<Avatar
+									v-else
 									:src="source.project.icon_url"
 									:alt="source.project.title"
 									:tint-by="source.project.id"
@@ -333,6 +340,7 @@ const installTooltip = computed(() => {
 				hideActions ? 'flex-1' : 'flex-1 min-w-0',
 				enabled === false && !disabled ? 'grayscale opacity-50' : '',
 			]"
+			data-no-drag
 		>
 			<template v-if="version">
 				<AutoLink

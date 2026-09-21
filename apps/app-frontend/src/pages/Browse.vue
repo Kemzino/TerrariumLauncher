@@ -3,8 +3,10 @@ import type { Labrinth } from '@modrinth/api-client'
 import {
 	CheckIcon,
 	CompassIcon,
+	CurseForgeIcon,
 	ExternalIcon,
 	GlobeIcon,
+	ModrinthIcon,
 	PlusIcon,
 	ServerStackIcon,
 	SpinnerIcon,
@@ -43,13 +45,24 @@ import { useAppEvent } from '@/composables/use-app-event'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { get_project, get_search_results_v3, get_version_many } from '@/helpers/cache.js'
 import {
+	cfModToSearchHit,
+	type CurseForgeCategory,
+	curseforgeProjectId,
+	isCurseForgeProjectId,
+	terrarium_curseforge_get_categories,
+	terrarium_curseforge_search,
+} from '@/helpers/curseforge'
+import {
+	get_content_items as getInstanceContentItems,
 	get_installed_project_ids as getInstalledProjectIds,
+	get_linked_modpack_content as getLinkedModpackContent,
 	getInstanceIconUrl,
 	list as listInstances,
 } from '@/helpers/instance'
 import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata'
 import { get as getSettings, set as setSettings } from '@/helpers/settings.ts'
 import { get_categories, get_game_versions, get_loaders } from '@/helpers/tags'
+import { terrarium_curseforge_has_key } from '@/helpers/terrarium'
 import { get_instance_worlds } from '@/helpers/worlds'
 import {
 	instanceDetailQueryOptions,
@@ -261,10 +274,47 @@ const [categories, loaders, availableGameVersions] = await Promise.all([
 		.then(ref<Labrinth.Tags.v2.GameVersion[]>),
 ])
 
+// Terrarium: джерело пошуку — Modrinth або CurseForge (`?src=curseforge`).
+// Для CF бічна панель показує його категорії (у формі категорій Modrinth),
+// а завантажувачі/версії гри — спільні.
+type BrowseSource = 'modrinth' | 'curseforge'
+const browseSource = ref<BrowseSource>(route.query.src === 'curseforge' ? 'curseforge' : 'modrinth')
+const curseforgeAvailable = ref(false)
+void terrarium_curseforge_has_key()
+	.then((has) => (curseforgeAvailable.value = has))
+	.catch(() => {})
+const curseforgeCategories = ref<CurseForgeCategory[]>([])
+const CF_CATEGORY_TYPES = new Set(['mod', 'resourcepack', 'shader', 'datapack', 'modpack'])
+async function loadCurseForgeCategories() {
+	const type =
+		projectType.value === 'modpack'
+			? null
+			: CF_CATEGORY_TYPES.has(projectType.value)
+				? projectType.value
+				: 'mod'
+	curseforgeCategories.value = await terrarium_curseforge_get_categories(type).catch(() => [])
+}
+const isCurseForgeSource = computed(
+	() => browseSource.value === 'curseforge' && CF_CATEGORY_TYPES.has(projectType.value),
+)
+const curseforgeCategoryTags = computed<Labrinth.Tags.v2.Category[]>(() =>
+	curseforgeCategories.value.map((category) => ({
+		icon: '',
+		name: category.name,
+		project_type: projectType.value as never,
+		header: 'categories',
+	})),
+)
+function curseforgeCategoryId(name: string) {
+	return curseforgeCategories.value.find(
+		(c) => c.name === name || c.slug === name || c.name.toLowerCase() === name.toLowerCase(),
+	)?.id
+}
+
 const tags: Ref<Tags> = computed(() => ({
 	gameVersions: availableGameVersions.value ?? [],
 	loaders: loaders.value ?? [],
-	categories: categories.value ?? [],
+	categories: isCurseForgeSource.value ? curseforgeCategoryTags.value : (categories.value ?? []),
 }))
 
 if (isFromWorlds.value && route.params.projectType !== 'server') {
@@ -276,9 +326,52 @@ if (isFromWorlds.value && route.params.projectType !== 'server') {
 
 enforceSetupModpackRoute(route.params.projectType as string | undefined)
 
+// Terrarium: CF-моди примірника — за ID мода CurseForge (щоб картки CF
+// показували «Встановлено»)
+const curseforgeInstalledIds = ref<string[]>([])
+// slug-и встановлених Modrinth-проєктів — той самий мод на CF позначаємо як встановлений
+const installedProjectSlugs = ref<Set<string>>(new Set())
+async function loadCurseForgeInstalledIds() {
+	if (!instance.value) {
+		curseforgeInstalledIds.value = []
+		installedProjectSlugs.value = new Set()
+		return
+	}
+	// Власний уміст + моди збірки
+	const [own, pack] = await Promise.all([
+		getInstanceContentItems(instance.value.id).catch(() => []),
+		getLinkedModpackContent(instance.value.id).catch(() => []),
+	])
+	const items = [...own, ...pack]
+	curseforgeInstalledIds.value = items
+		.filter((item) => item.curseforge)
+		.map((item) => curseforgeProjectId(item.curseforge!.mod_id))
+	installedProjectSlugs.value = new Set(
+		items.map((item) => item.project?.slug).filter((slug): slug is string => !!slug),
+	)
+}
 const allInstalledIds = computed(
-	() => new Set([...newlyInstalled.value, ...(installedProjectIds.value ?? [])]),
+	() =>
+		new Set([
+			...newlyInstalled.value,
+			...(installedProjectIds.value ?? []),
+			...curseforgeInstalledIds.value,
+		]),
 )
+
+async function setBrowseSource(source: BrowseSource) {
+	if (browseSource.value === source) return
+	browseSource.value = source
+	// Категорії різні — старі фільтри категорій втрачають сенс
+	searchState.currentFilters.value = searchState.currentFilters.value.filter(
+		(filter) => !filter.type.startsWith('category_'),
+	)
+	searchState.currentPage.value = 1
+	if (source === 'curseforge') {
+		await Promise.all([loadCurseForgeCategories(), loadCurseForgeInstalledIds()])
+	}
+	await searchState.refreshSearch()
+}
 
 function syncHiddenInstanceProjectIds() {
 	hiddenInstanceProjectIds.value = new Set([
@@ -545,6 +638,7 @@ onBeforeUnmount(() => {
 })
 
 const messages = defineMessages({
+	sourceLabel: { id: 'app.browse.source', defaultMessage: 'Джерело' },
 	addServersToInstance: {
 		id: 'app.browse.add-servers-to-instance',
 		defaultMessage: 'Adding server to instance',
@@ -616,6 +710,13 @@ const messages = defineMessages({
 })
 
 const projectType = ref<ProjectType>(route.params.projectType as ProjectType)
+// Terrarium: категорії CF залежать від типу вмісту
+watch(
+	() => projectType.value,
+	() => {
+		if (browseSource.value === 'curseforge') void loadCurseForgeCategories()
+	},
+)
 
 function resetInstanceContext() {
 	debugLog('instance context removed, resetting')
@@ -1014,11 +1115,13 @@ function getCardActions(
 			onClick: async () => {
 				setProjectInstalling(projectResult.project_id, true)
 				try {
-					const selectedInstall = instance.value
-						? await chooseInstanceInstallVersion(projectResult, currentProjectType)
-						: isModpack
-							? await chooseFilterMatchingInstallVersion(projectResult, currentProjectType)
-							: { versionId: null as string | null }
+					const selectedInstall = isCurseForgeProjectId(projectResult.project_id)
+						? { versionId: null as string | null }
+						: instance.value
+							? await chooseInstanceInstallVersion(projectResult, currentProjectType)
+							: isModpack
+								? await chooseFilterMatchingInstallVersion(projectResult, currentProjectType)
+								: { versionId: null as string | null }
 					if (selectedInstall === null) {
 						setProjectInstalling(projectResult.project_id, false)
 						return
@@ -1073,7 +1176,70 @@ function onSearchResultsInstalled(ids: string[]) {
 	newlyInstalled.value = Array.from(new Set([...newlyInstalled.value, ...ids]))
 }
 
+// Terrarium: пошук на CurseForge — ті самі параметри бічної панелі (запит,
+// сортування, категорії, версія гри, завантажувач, сторінка), результати у
+// формі карток Modrinth
+async function searchCurseForge(requestParams: string) {
+	const params = new URLSearchParams(requestParams.replace(/^\?/, ''))
+	const limit = Number(params.get('limit') ?? 20)
+	const offset = Number(params.get('offset') ?? 0)
+	const sortName = params.get('index') ?? 'relevance'
+	const filterString = params.get('new_filters') ?? ''
+	// Значення у фільтрах Modrinth обгорнуті бектіками (formatSearchFilterValue):
+	// categories = `Performance` або categories IN [`a`, `b`]. Заперечення
+	// (!=, NOT IN) CurseForge не підтримує — пропускаємо.
+	const values: Record<string, string[]> = {}
+	const unquote = (v: string) => v.trim().replace(/^[`"']|[`"']$/g, '')
+	for (const match of filterString.matchAll(
+		/(\w+) (!=|=|NOT IN|IN) (?:[`"]([^`"]*)[`"]|\[([^\]]*)\])/g,
+	)) {
+		const [, field, operator, single, list] = match
+		if (operator === '!=' || operator === 'NOT IN') continue
+		const parsed = list !== undefined ? list.split(',').map(unquote) : [unquote(single ?? '')]
+		values[field] = [...(values[field] ?? []), ...parsed.filter((v) => !!v)]
+	}
+	const loaderNames = new Set(['forge', 'fabric', 'quilt', 'neoforge'])
+	const loader = (values.categories ?? []).find((c) => loaderNames.has(c)) ?? instance.value?.loader
+	const categoryIds = (values.categories ?? [])
+		.filter((c) => !loaderNames.has(c))
+		.map(curseforgeCategoryId)
+		.filter((id): id is number => typeof id === 'number')
+	const gameVersion = values.game_versions?.[0] ?? instance.value?.game_version
+	const sort =
+		sortName === 'downloads'
+			? 'downloads'
+			: sortName === 'newest'
+				? 'newest'
+				: sortName === 'updated'
+					? 'updated'
+					: 'popularity'
+	const result = await terrarium_curseforge_search({
+		project_type: CF_CATEGORY_TYPES.has(projectType.value) ? projectType.value : 'mod',
+		modpacks: projectType.value === 'modpack',
+		query: params.get('query') ?? undefined,
+		sort,
+		category_ids: categoryIds,
+		game_version: gameVersion,
+		loader: projectType.value === 'mod' ? loader : undefined,
+		index: offset,
+		page_size: limit,
+	})
+	const hits = result.hits.map((mod) => {
+		const hit = cfModToSearchHit(mod) as unknown as Labrinth.Search.v3.ResultSearchProject & {
+			installed?: boolean
+		}
+		hit.installed =
+			allInstalledIds.value.has(hit.project_id) || installedProjectSlugs.value.has(mod.slug)
+		return hit
+	})
+	return { projectHits: hits, serverHits: [], total_hits: result.total, per_page: result.page_size }
+}
+
 async function search(requestParams: string) {
+	if (isCurseForgeSource.value) {
+		debugLog('searching curseforge', requestParams)
+		return searchCurseForge(requestParams)
+	}
 	debugLog('searching v3', requestParams)
 	const isServer = projectType.value === 'server'
 
@@ -1148,14 +1314,20 @@ const lockedFilterMessages = computed(() => ({
 	providedBy: formatMessage(messages.providedByInstance),
 }))
 
+// Terrarium: якщо відкрили одразу з `?src=curseforge` — категорії CF до першого пошуку
+if (isCurseForgeSource.value) {
+	await Promise.all([loadCurseForgeCategories(), loadCurseForgeInstalledIds()])
+}
+
 const searchState = useBrowseSearch({
 	projectType,
 	tags,
 	active: browseRouteActive,
 	providedFilters: combinedProvidedFilters,
 	search,
-	persistentQueryParams: ['i', 'ai', 'shi', 'sid', 'wid', 'from'],
+	persistentQueryParams: ['i', 'ai', 'shi', 'sid', 'wid', 'from', 'src'],
 	getExtraQueryParams: () => ({
+		src: browseSource.value === 'curseforge' ? 'curseforge' : undefined,
 		sid: serverIdQuery.value || undefined,
 		wid: effectiveServerWorldId.value || undefined,
 		ai: instanceHideInstalled.value ? 'true' : undefined,
@@ -1272,6 +1444,12 @@ provideBrowseManager({
 	}),
 	selectableProjectTypes,
 	showProjectTypeTabs: computed(() => !isServerContext.value),
+	// Terrarium: CurseForge не віддає ліцензію, середовище й «залежить від»
+	hiddenFilterTypes: computed(() =>
+		isCurseForgeSource.value
+			? ['license', 'environment', 'compatible_dependency_project_ids', 'advanced']
+			: [],
+	),
 	variant: 'app',
 	getCardActions,
 	installContext,
@@ -1355,7 +1533,47 @@ provideBrowseManager({
 			@create="handleServerModpackFlowCreate"
 		/>
 		<Teleport v-if="browseRouteActive" to="#sidebar-teleport-target">
-			<BrowseSidebar />
+			<BrowseSidebar>
+				<template #prepend>
+					<!-- Terrarium: джерело пошуку -->
+					<div
+						v-if="curseforgeAvailable && !isServerContext && CF_CATEGORY_TYPES.has(projectType)"
+						class="border-0 border-b-[1px] border-solid border-[--brand-gradient-border] p-4"
+					>
+						<p class="m-0 mb-2 text-sm font-semibold text-contrast">
+							{{ formatMessage(messages.sourceLabel) }}
+						</p>
+						<div class="flex gap-1 rounded-xl bg-button-bg p-1">
+							<button
+								type="button"
+								class="flex flex-1 items-center justify-center gap-1.5 rounded-lg border-none px-2 py-1.5 text-sm font-semibold transition-colors"
+								:class="
+									browseSource === 'modrinth'
+										? 'bg-brand text-brand-inverted'
+										: 'bg-transparent text-secondary hover:text-contrast'
+								"
+								@click="setBrowseSource('modrinth')"
+							>
+								<ModrinthIcon class="size-4" aria-hidden="true" />
+								Modrinth
+							</button>
+							<button
+								type="button"
+								class="flex flex-1 items-center justify-center gap-1.5 rounded-lg border-none px-2 py-1.5 text-sm font-semibold transition-colors"
+								:class="
+									browseSource === 'curseforge'
+										? 'bg-orange text-brand-inverted'
+										: 'bg-transparent text-secondary hover:text-contrast'
+								"
+								@click="setBrowseSource('curseforge')"
+							>
+								<CurseForgeIcon class="size-4" aria-hidden="true" />
+								CurseForge
+							</button>
+						</div>
+					</div>
+				</template>
+			</BrowseSidebar>
 		</Teleport>
 	</div>
 </template>

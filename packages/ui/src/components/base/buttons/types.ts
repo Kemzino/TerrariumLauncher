@@ -124,7 +124,8 @@ export type ButtonMenuLeafOption =
 
 export interface ButtonMenuSubmenu extends ButtonMenuItemBase {
 	type: 'submenu'
-	options: ButtonMenuLeafOption[]
+	/** Може містити інші підменю — дерево будь-якої глибини */
+	options: ButtonMenuOption[]
 }
 
 export type ButtonMenuOption = ButtonMenuLeafOption | ButtonMenuSubmenu

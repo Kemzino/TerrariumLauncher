@@ -7,6 +7,7 @@ import {
 	DownloadIcon,
 	GithubIcon,
 	GlobeIcon,
+	HistoryIcon,
 	ModrinthIcon,
 	PackageOpenIcon,
 	PlayIcon,
@@ -26,6 +27,7 @@ import { useRouter } from 'vue-router'
 import terrariumLogo from '@/assets/terrarium/logo.png'
 import AccountsCard from '@/components/ui/AccountsCard.vue'
 import TerrariumBackdrop from '@/components/ui/TerrariumBackdrop.vue'
+import TerrariumChangelogModal from '@/components/ui/TerrariumChangelogModal.vue'
 import TerrariumInstancePicker from '@/components/ui/TerrariumInstancePicker.vue'
 import TerrariumNewsWidget from '@/components/ui/TerrariumNewsWidget.vue'
 import TerrariumPublishModal from '@/components/ui/TerrariumPublishModal.vue'
@@ -160,6 +162,11 @@ const messages = defineMessages({
 		defaultMessage: 'Доступна версія: {tag}',
 	},
 	upToDate: { id: 'terrarium.hero.up-to-date', defaultMessage: 'У тебе остання версія' },
+	changelog: { id: 'terrarium.hero.changelog', defaultMessage: 'Що нового' },
+	changelogUnread: {
+		id: 'terrarium.hero.changelog-unread',
+		defaultMessage: 'Є нові зміни, яких ти ще не бачив',
+	},
 	unknownLatest: {
 		id: 'terrarium.hero.unknown-latest',
 		defaultMessage: 'Встановлено {tag} · не вдалося перевірити, чи є новіша',
@@ -223,6 +230,25 @@ const installedTag = computed<string | null>(() => {
 	return packState.value.installed_tag
 })
 const publishModal = ref<InstanceType<typeof TerrariumPublishModal> | null>(null)
+const changelogModal = ref<InstanceType<typeof TerrariumChangelogModal> | null>(null)
+// Непрочитаний список змін: останній реліз новіший за той, що гравець уже переглянув
+const changelogSeenTag = ref<string | null>(null)
+function readChangelogSeen() {
+	try {
+		changelogSeenTag.value = localStorage.getItem(
+			`terrarium-changelog-seen:${activePack.value}:${activeChannel.value}`,
+		)
+	} catch {
+		changelogSeenTag.value = null
+	}
+}
+const changelogUnread = computed(
+	() => !!release.value && release.value.tag !== changelogSeenTag.value,
+)
+watch([activePack, activeChannel], readChangelogSeen, { immediate: true })
+function openChangelog() {
+	changelogModal.value?.show()
+}
 const syncModal = ref<InstanceType<typeof TerrariumSyncModal> | null>(null)
 // Синхронізація працює з примірниками поточного каналу; якщо в каналі збірки
 // немає — беремо стабільну
@@ -758,6 +784,19 @@ onMounted(async () => {
 						<PackageOpenIcon />
 						{{ isServer ? formatMessage(messages.modsServer) : formatMessage(messages.mods) }}
 					</Button>
+					<Button
+						v-tooltip="changelogUnread ? formatMessage(messages.changelogUnread) : undefined"
+						size="xl"
+						class="relative"
+						@click="openChangelog"
+					>
+						<HistoryIcon /> {{ formatMessage(messages.changelog) }}
+						<span
+							v-if="changelogUnread"
+							class="absolute -right-1 -top-1 size-3 rounded-full bg-orange ring-2 ring-[var(--color-raised-bg)]"
+							aria-hidden="true"
+						></span>
+					</Button>
 					<!-- Публікація — лише для клієнтської збірки: серверна на сервер із GitHub
 					     не підтягується, тож кнопка там лише вводила б в оману. -->
 					<Button
@@ -858,6 +897,13 @@ onMounted(async () => {
 		</div>
 
 		<TerrariumPublishModal ref="publishModal" @published="onPublished" />
+		<TerrariumChangelogModal
+			ref="changelogModal"
+			:pack="activePack"
+			:channel="activeChannel"
+			:installed-tag="installedTag"
+			@seen="(tag) => (changelogSeenTag = tag)"
+		/>
 		<TerrariumSyncModal ref="syncModal" @synced="onSynced" />
 	</section>
 </template>

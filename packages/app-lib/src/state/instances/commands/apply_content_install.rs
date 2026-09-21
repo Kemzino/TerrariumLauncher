@@ -233,6 +233,12 @@ pub(crate) async fn switch_project_version_with_dependencies(
     version_id: &str,
     state: &State,
 ) -> crate::Result<String> {
+    super::mod_groups::ensure_group_update_allowed(
+        instance_id,
+        project_path,
+        state,
+    )
+    .await?;
     let version = CachedEntry::get_version(
         version_id,
         Some(CacheBehaviour::MustRevalidate),

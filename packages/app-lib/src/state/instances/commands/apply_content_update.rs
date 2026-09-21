@@ -68,6 +68,12 @@ pub(crate) async fn update_project(
     project_path: &str,
     state: &State,
 ) -> crate::Result<String> {
+    super::mod_groups::ensure_group_update_allowed(
+        instance_id,
+        project_path,
+        state,
+    )
+    .await?;
     let updates = check_content_updates(
         instance_id,
         Some(CacheBehaviour::MustRevalidate),
@@ -159,6 +165,14 @@ pub(crate) async fn update_all_projects(
     )
     .await?;
     let plan = plan_bulk_update(instance_id, state).await?;
+    for update in &plan.project_updates {
+        super::mod_groups::ensure_group_update_allowed(
+            instance_id,
+            &update.relative_path,
+            state,
+        )
+        .await?;
+    }
     let download_total =
         plan.project_updates.len() + plan.dependency_additions.len();
     let downloads =

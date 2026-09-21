@@ -125,6 +125,10 @@ pub struct TerrariumState {
     pub client_test: PackState,
     #[serde(default)]
     pub server_test: PackState,
+    /// Ключ CurseForge API (console.curseforge.com) — щоб показувати іконки,
+    /// сторінки й оновлення модів не з Modrinth. Перевизначає вбудований.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curseforge_api_key: Option<String>,
 
     // Поля з часів однієї збірки — читаємо для міграції, не пишемо.
     #[serde(default, skip_serializing)]
@@ -428,6 +432,46 @@ pub async fn fetch_latest_release(
                 ))
             })?;
     to_release(pack, Channel::Stable, stable_repo, release, false)
+}
+
+/// Запис списку змін — реліз збірки без файлів (для головної).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerrariumChangelogEntry {
+    pub tag: String,
+    pub name: String,
+    pub body: String,
+    pub published_at: Option<String>,
+    pub html_url: String,
+    pub prerelease: bool,
+}
+
+/// Останні релізи збірки (новіші перші) — для списку змін на головній.
+#[tracing::instrument]
+pub async fn list_releases(
+    pack: PackKind,
+    channel: Channel,
+    limit: u32,
+) -> crate::Result<Vec<TerrariumChangelogEntry>> {
+    let token = read_token(&get_state().await?);
+    let repo = pack.repo(channel);
+    let url = format!(
+        "https://api.github.com/repos/{repo}/releases?per_page={}",
+        limit.clamp(1, 50)
+    );
+    let releases: Vec<GithubRelease> =
+        github_get_json(&url, token.as_deref(), "Список змін").await?;
+    Ok(releases
+        .into_iter()
+        .filter(|r| r.assets.iter().any(|a| a.name.ends_with(".mrpack")))
+        .map(|r| TerrariumChangelogEntry {
+            name: r.name.clone().unwrap_or_else(|| r.tag_name.clone()),
+            tag: r.tag_name,
+            body: r.body.unwrap_or_default(),
+            published_at: r.published_at,
+            html_url: r.html_url,
+            prerelease: channel == Channel::Test,
+        })
+        .collect())
 }
 
 /// Завантажує `.mrpack` релізу в кеш лаунчера і повертає шлях до файлу.

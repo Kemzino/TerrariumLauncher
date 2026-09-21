@@ -17,8 +17,10 @@ withDefaults(
 		item: NewsMessage
 		/** Без аватара/автора — коли контекст і так зрозумілий (обкладинка поста) */
 		compact?: boolean
+		/** Гравець ще не бачив це повідомлення */
+		unread?: boolean
 	}>(),
-	{ compact: false },
+	{ compact: false, unread: false },
 )
 const emit = defineEmits<{ openImage: [url: string] }>()
 
@@ -38,7 +40,7 @@ function onContentClick(event: MouseEvent) {
 </script>
 
 <template>
-	<article class="news-message" :class="{ 'is-compact': compact }">
+	<article class="news-message" :class="{ 'is-compact': compact, 'is-unread': unread }">
 		<Avatar v-if="!compact" :src="item.avatar" size="1.75rem" class="news-message__avatar" circle />
 		<div class="news-message__main">
 			<div v-if="!compact" class="news-message__meta">
@@ -105,6 +107,15 @@ function onContentClick(event: MouseEvent) {
 	display: flex;
 	gap: 0.6rem;
 	min-width: 0;
+}
+
+/* Непрочитане: смужка зліва */
+.news-message.is-unread {
+	position: relative;
+	padding-left: 0.6rem;
+	margin-left: -0.6rem;
+	border-left: 3px solid var(--color-orange);
+	border-radius: 4px;
 }
 
 .news-message__avatar {

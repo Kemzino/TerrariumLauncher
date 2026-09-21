@@ -20,6 +20,8 @@ export interface TerrariumState {
 	server: PackState
 	client_test: PackState
 	server_test: PackState
+	/** Ключ CurseForge API — перевизначає вбудований під час збірки */
+	curseforge_api_key?: string | null
 }
 
 export function packStateKey(pack: PackKind, channel: Channel) {
@@ -51,6 +53,73 @@ export async function terrarium_get_state() {
 
 export async function terrarium_set_state(state: TerrariumState) {
 	return await invoke<void>('plugin:terrarium|terrarium_set_state', { state })
+}
+
+export interface TerrariumChangelogEntry {
+	tag: string
+	name: string
+	body: string
+	published_at: string | null
+	html_url: string
+	prerelease: boolean
+}
+
+/** Останні релізи збірки (новіші перші) — список змін на головній */
+export async function terrarium_list_releases(pack: PackKind, channel: Channel, limit = 20) {
+	return await invoke<TerrariumChangelogEntry[]>('plugin:terrarium|terrarium_list_releases', {
+		pack,
+		channel,
+		limit,
+	})
+}
+
+/** Чи є ключ CurseForge (з налаштувань або вбудований) */
+export async function terrarium_curseforge_has_key() {
+	return await invoke<boolean>('plugin:terrarium|terrarium_curseforge_has_key')
+}
+
+/** Файл мода на CurseForge (див. app-lib `CurseForgeFile`) */
+export interface CurseForgeFile {
+	id: number
+	display_name: string
+	file_name: string
+	/** 1 — реліз, 2 — бета, 3 — альфа */
+	release_type: number
+	file_date: string
+	game_versions: string[]
+	/** false — автор заборонив сторонні завантаження */
+	downloadable: boolean
+	url: string
+}
+
+/** Файли мода з CurseForge для версії гри й завантажувача примірника */
+export async function terrarium_curseforge_list_files(
+	modId: number,
+	slug: string,
+	gameVersion: string,
+	loader: string | null,
+) {
+	return await invoke<CurseForgeFile[]>('plugin:terrarium|terrarium_curseforge_list_files', {
+		modId,
+		slug,
+		gameVersion,
+		loader,
+	})
+}
+
+/** Замінити файл мода з CurseForge іншим файлом; повертає новий шлях */
+export async function terrarium_curseforge_switch_file(
+	instanceId: string,
+	projectPath: string,
+	modId: number,
+	fileId: number,
+) {
+	return await invoke<string>('plugin:terrarium|terrarium_curseforge_switch_file', {
+		instanceId,
+		projectPath,
+		modId,
+		fileId,
+	})
 }
 
 export async function terrarium_fetch_latest_release(pack: PackKind, channel: Channel = 'stable') {

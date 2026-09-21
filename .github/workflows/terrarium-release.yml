@@ -162,7 +162,19 @@ jobs:
 
       - name: Prepare app-lib .env
         shell: bash
-        run: cp packages/app-lib/.env.prod packages/app-lib/.env
+        env:
+          # Ключ CurseForge API (console.curseforge.com) вбудовується в лаунчер:
+          # без нього моди не з Modrinth показуються без іконок і оновлень
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+        run: |
+          cp packages/app-lib/.env.prod packages/app-lib/.env
+          if [ -n "$CURSEFORGE_API_KEY" ]; then
+            # В одинарних лапках: ключ виду $2a$10$…, а dotenvy у build.rs
+            # без лапок підставляє $2, $10 як змінні й спотворює його
+            echo "CURSEFORGE_API_KEY='$CURSEFORGE_API_KEY'" >> packages/app-lib/.env
+          else
+            echo "::warning::CURSEFORGE_API_KEY не задано в secrets — CurseForge у лаунчері не працюватиме"
+          fi
 
       # Ті самі кроки, що робить turbo для @modrinth/app-frontend#build, але явно
       - name: Build frontend

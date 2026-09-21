@@ -24,6 +24,39 @@ pub struct ContentItem {
     pub embedded_metadata: Option<EmbeddedContentMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub synced_pack: Option<SyncedPackInfo>,
+    /// Terrarium: мод упізнано на CurseForge (лише для файлів, яких нема на
+    /// Modrinth) — іконка, сторінка, автор, чи є новіший файл.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curseforge: Option<CurseForgeContent>,
+}
+
+/// Terrarium: картка мода з CurseForge для файлу примірника.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CurseForgeContent {
+    pub mod_id: u64,
+    pub name: String,
+    pub slug: String,
+    /// Сторінка мода на curseforge.com
+    pub url: String,
+    pub icon_url: Option<String>,
+    pub author: Option<String>,
+    pub author_url: Option<String>,
+    /// Встановлений файл
+    pub file_id: u64,
+    pub file_name: String,
+    /// Назва файлу з CurseForge («Create Tick Controller 1.4.24»)
+    pub display_name: String,
+    /// Новіший файл для цієї версії гри й завантажувача, якщо є
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update: Option<CurseForgeUpdate>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CurseForgeUpdate {
+    pub file_id: u64,
+    pub file_name: String,
+    /// Сторінка файлу на curseforge.com — звідти його можна завантажити
+    pub url: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

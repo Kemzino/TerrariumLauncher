@@ -577,6 +577,7 @@ pub async fn upload_synced_pack(
                 source_kind: Some(ContentSourceKind::Local),
                 embedded_metadata: None,
                 synced_pack: None,
+                curseforge: None,
             },
         },
     );

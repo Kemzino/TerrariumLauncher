@@ -107,6 +107,12 @@ function getLoaderFieldValues(
 	)
 }
 
+// Terrarium: результат із CurseForge (див. app helpers/curseforge.ts)
+function curseforgeMeta(result: Labrinth.Search.v3.ResultSearchProject) {
+	return (result as { terrarium_curseforge?: { url: string; authors?: { url?: string | null }[] } })
+		.terrarium_curseforge
+}
+
 function getProjectCardTags(result: Labrinth.Search.v3.ResultSearchProject, displayOnly: boolean) {
 	const tags = new Set(displayOnly ? result.display_categories : result.categories)
 
@@ -345,13 +351,15 @@ function getProjectCardTags(result: Labrinth.Search.v3.ResultSearchProject, disp
 					:icon-url="result.icon_url ?? undefined"
 					:author="{
 						name: result.organization == null ? result.author : result.organization,
-						link:
-							result.organization_id == null
+						link: curseforgeMeta(result)
+							? (curseforgeMeta(result)?.authors?.[0]?.url ?? curseforgeMeta(result)?.url)
+							: result.organization_id == null
 								? `/user/${encodeURIComponent(result.author_id ?? result.author)}`
 								: ctx.variant === 'web'
 									? `/organization/${result.organization_id}`
 									: `https://modrinth.com/organization/${result.organization_id}`,
 					}"
+					:curseforge="!!curseforgeMeta(result)"
 					:date-updated="result.date_modified"
 					:date-published="result.date_created"
 					:displayed-date="

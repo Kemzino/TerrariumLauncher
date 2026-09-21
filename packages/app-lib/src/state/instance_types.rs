@@ -179,10 +179,15 @@ impl ProjectType {
             "shaderpacks" => Some(ProjectType::ShaderPack),
             _ => None,
         };
-        // Terrarium: моди можуть лежати в групі `mods/<Група>/x.jar`
+        // Terrarium: моди можуть лежати в групі будь-якої глибини
+        // (`mods/<Група>/<Підгрупа>/x.jar`) — шукаємо `mods` серед предків.
+        // Ліміт глибини той самий, що й у сканера груп.
         by_name(parent).or_else(|| {
-            let grandparent = parent.parent()?;
-            (by_name(grandparent) == Some(ProjectType::Mod))
+            parent
+                .ancestors()
+                .skip(1)
+                .take(8)
+                .any(|dir| by_name(dir) == Some(ProjectType::Mod))
                 .then_some(ProjectType::Mod)
         })
     }

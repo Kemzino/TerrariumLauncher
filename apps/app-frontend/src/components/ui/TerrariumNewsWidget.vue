@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ChevronDownIcon, DiscordIcon, ExternalIcon, RefreshCwIcon } from '@modrinth/assets'
 import { Button, defineMessages, useVIntl } from '@modrinth/ui'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import NewsMessageItem from '@/components/ui/terrarium-news/NewsMessageItem.vue'
 import NewsPostModal from '@/components/ui/terrarium-news/NewsPostModal.vue'
@@ -10,6 +10,7 @@ import { openDiscordLink, openTerrariumLink, TERRARIUM_NEWS_URL } from '@/helper
 import {
 	imagesOfMessage,
 	imagesOfPost,
+	type NewsChannel,
 	type NewsFeed,
 	type NewsMessage,
 	type NewsPost,
@@ -62,6 +63,74 @@ function selectChannel(id: string) {
 	localStorage.setItem(CHANNEL_KEY, id)
 }
 
+// Непрочитане: Discord-id зростають із часом, тож зберігаємо найбільший
+// побачений id на канал. Перший запуск (нічого не збережено) — усе «прочитано»,
+// щоб не сипати крапками на старі пости.
+const READ_KEY = 'terrarium-news-read'
+const readIds = ref<Record<string, string>>(readStoredIds())
+function readStoredIds(): Record<string, string> {
+	try {
+		return JSON.parse(localStorage.getItem(READ_KEY) ?? '{}')
+	} catch {
+		return {}
+	}
+}
+function idNewer(a: string, b: string) {
+	return a.length === b.length ? a > b : a.length > b.length
+}
+function channelItemIds(channel: NewsChannel): string[] {
+	return channel.kind === 'forum'
+		? (channel.posts ?? []).map((p) => p.id)
+		: (channel.messages ?? []).map((m) => m.id)
+}
+function isUnreadId(channelId: string, id: string) {
+	const read = readIds.value[channelId]
+	return !!read && idNewer(id, read)
+}
+function channelHasUnread(channel: NewsChannel) {
+	return channelItemIds(channel).some((id) => isUnreadId(channel.id, id))
+}
+/** Позначити канал прочитаним (найновіший id) */
+function markChannelRead(channel: NewsChannel | null) {
+	if (!channel) return
+	const ids = channelItemIds(channel)
+	if (ids.length === 0) return
+	const newest = ids.reduce((a, b) => (idNewer(b, a) ? b : a))
+	if (readIds.value[channel.id] === newest) return
+	readIds.value = { ...readIds.value, [channel.id]: newest }
+	localStorage.setItem(READ_KEY, JSON.stringify(readIds.value))
+}
+/** Після першого завантаження — усі канали без запису вважаємо прочитаними */
+function seedReadIds() {
+	if (!feed.value) return
+	let changed = false
+	const next = { ...readIds.value }
+	for (const channel of feed.value.channels) {
+		if (next[channel.id]) continue
+		const ids = channelItemIds(channel)
+		if (ids.length === 0) continue
+		next[channel.id] = ids.reduce((a, b) => (idNewer(b, a) ? b : a))
+		changed = true
+	}
+	if (changed) {
+		readIds.value = next
+		localStorage.setItem(READ_KEY, JSON.stringify(next))
+	}
+}
+// Активний розгорнутий канал гравець бачить — після короткої паузи позначаємо
+// прочитаним (щоб смужки встигли показатись)
+let readTimer: ReturnType<typeof setTimeout> | null = null
+watch(
+	[activeChannel, collapsed, feed],
+	() => {
+		if (readTimer) clearTimeout(readTimer)
+		if (collapsed.value || !activeChannel.value) return
+		const channel = activeChannel.value
+		readTimer = setTimeout(() => markChannelRead(channel), 4000)
+	},
+	{ immediate: true },
+)
+
 async function refresh() {
 	if (loading.value) return
 	loading.value = true
@@ -72,6 +141,7 @@ async function refresh() {
 		const data = (await res.json()) as NewsFeed
 		feed.value = data
 		localStorage.setItem(CACHE_KEY, JSON.stringify(data))
+		seedReadIds()
 	} catch (err) {
 		// Офлайн або стрічки ще немає — лишаємо останню збережену
 		console.warn('Terrarium: не вдалося оновити новини', err)
@@ -104,6 +174,7 @@ onMounted(() => {
 	if (cached) {
 		try {
 			feed.value = JSON.parse(cached) as NewsFeed
+			seedReadIds()
 		} catch {
 			localStorage.removeItem(CACHE_KEY)
 		}
@@ -160,6 +231,7 @@ onBeforeUnmount(() => {
 					@click="selectChannel(channel.id)"
 				>
 					#{{ channel.name }}
+					<span v-if="channelHasUnread(channel)" class="terrarium-news__dot" aria-hidden="true" />
 				</button>
 			</div>
 
@@ -173,6 +245,7 @@ onBeforeUnmount(() => {
 						v-for="post in activeChannel.posts"
 						:key="post.id"
 						class="terrarium-news__post"
+						:class="{ 'is-unread': isUnreadId(activeChannel.id, post.id) }"
 						:title="post.title"
 						@click="postModal?.show(post)"
 					>
@@ -222,6 +295,7 @@ onBeforeUnmount(() => {
 					v-for="item in activeChannel.messages"
 					:key="item.id"
 					:item="item"
+					:unread="isUnreadId(activeChannel.id, item.id)"
 					@open-image="openMessageImage(item, $event)"
 				/>
 				<Button
@@ -254,6 +328,20 @@ onBeforeUnmount(() => {
 	flex-wrap: wrap;
 	gap: 0.3rem;
 	margin-bottom: 0.6rem;
+}
+
+.terrarium-news__dot {
+	display: inline-block;
+	width: 0.45rem;
+	height: 0.45rem;
+	margin-left: 0.3rem;
+	border-radius: 999px;
+	background: var(--color-orange);
+	vertical-align: middle;
+}
+
+.terrarium-news__post.is-unread {
+	box-shadow: inset 3px 0 0 var(--color-orange);
 }
 
 .terrarium-news__tab {

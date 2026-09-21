@@ -5,7 +5,11 @@ import { onMounted, ref } from 'vue'
 
 import TerrariumModrinthCard from '@/components/ui/TerrariumModrinthCard.vue'
 import { useTerrariumState } from '@/composables/use-terrarium-state'
-import { type AdminInfo, terrarium_verify_admin_token } from '@/helpers/terrarium'
+import {
+	type AdminInfo,
+	terrarium_curseforge_has_key,
+	terrarium_verify_admin_token,
+} from '@/helpers/terrarium'
 
 const { formatMessage } = useVIntl()
 const { handleError, addNotification } = injectNotificationManager()
@@ -65,6 +69,30 @@ const messages = defineMessages({
 		id: 'terrarium.settings.not-set',
 		defaultMessage: 'Ключ не задано — ти граєш як звичайний гравець.',
 	},
+	cfTitle: { id: 'terrarium.settings.cf-title', defaultMessage: 'CurseForge' },
+	cfDescription: {
+		id: 'terrarium.settings.cf-description',
+		defaultMessage:
+			'Моди, яких нема на Modrinth, лаунчер упізнає на CurseForge: показує їхню іконку, сторінку й чи є новіший файл. Для цього потрібен ключ CurseForge API (console.curseforge.com). У збірках лаунчера ключ уже вбудований; тут його можна перевизначити.',
+	},
+	cfActive: {
+		id: 'terrarium.settings.cf-active',
+		defaultMessage: 'Ключ CurseForge задано — моди з CurseForge упізнаються.',
+	},
+	cfInactive: {
+		id: 'terrarium.settings.cf-inactive',
+		defaultMessage:
+			'Ключа CurseForge немає — моди не з Modrinth показуються без іконок і оновлень.',
+	},
+	cfOwnKey: { id: 'terrarium.settings.cf-own-key', defaultMessage: '(твій ключ із налаштувань)' },
+	cfKeyLabel: { id: 'terrarium.settings.cf-key-label', defaultMessage: 'Ключ CurseForge API' },
+	cfKeyPlaceholder: { id: 'terrarium.settings.cf-key-placeholder', defaultMessage: '$2a$10$…' },
+	cfSave: { id: 'terrarium.settings.cf-save', defaultMessage: 'Зберегти' },
+	cfSaved: {
+		id: 'terrarium.settings.cf-saved',
+		defaultMessage: 'Ключ CurseForge збережено — перевідкрий вкладку «Уміст»',
+	},
+	cfRemoved: { id: 'terrarium.settings.cf-removed', defaultMessage: 'Ключ CurseForge видалено' },
 })
 
 const tokenInput = ref('')
@@ -140,7 +168,48 @@ async function remove() {
 	}
 }
 
-onMounted(load)
+// Terrarium: ключ CurseForge API (див. app-lib terrarium_curseforge.rs)
+const cfKeyInput = ref('')
+const cfHasKey = ref(false)
+const cfBusy = ref(false)
+
+async function loadCurseForge() {
+	cfHasKey.value = await terrarium_curseforge_has_key().catch(() => false)
+}
+
+async function saveCurseForgeKey() {
+	const key = cfKeyInput.value.trim()
+	if (!key) return
+	cfBusy.value = true
+	try {
+		await patchState({ curseforge_api_key: key })
+		cfKeyInput.value = ''
+		await loadCurseForge()
+		addNotification({ type: 'success', title: formatMessage(messages.cfSaved) })
+	} catch (err) {
+		handleError(err)
+	} finally {
+		cfBusy.value = false
+	}
+}
+
+async function removeCurseForgeKey() {
+	cfBusy.value = true
+	try {
+		await patchState({ curseforge_api_key: null })
+		await loadCurseForge()
+		addNotification({ type: 'success', title: formatMessage(messages.cfRemoved) })
+	} catch (err) {
+		handleError(err)
+	} finally {
+		cfBusy.value = false
+	}
+}
+
+onMounted(() => {
+	void load()
+	void loadCurseForge()
+})
 </script>
 
 <template>
@@ -233,5 +302,60 @@ onMounted(load)
 		</div>
 
 		<TerrariumModrinthCard class="mt-6" />
+
+		<h3 class="m-0 mt-8 text-lg font-semibold text-contrast">
+			{{ formatMessage(messages.cfTitle) }}
+		</h3>
+		<p class="m-0 mt-1">{{ formatMessage(messages.cfDescription) }}</p>
+		<div class="mt-4 rounded-xl border border-solid border-surface-5 bg-button-bg p-4">
+			<p v-if="cfHasKey" class="m-0 flex items-center gap-2 font-medium text-contrast">
+				<CheckCircleIcon class="shrink-0 text-brand" />
+				{{ formatMessage(messages.cfActive) }}
+				<span v-if="state.curseforge_api_key" class="font-normal text-secondary">
+					{{ formatMessage(messages.cfOwnKey) }}
+				</span>
+			</p>
+			<p v-else class="m-0 flex items-center gap-2 text-orange">
+				<XIcon class="shrink-0" />
+				{{ formatMessage(messages.cfInactive) }}
+			</p>
+		</div>
+		<div class="mt-4 flex flex-col gap-2">
+			<label class="font-semibold text-contrast" for="terrarium-curseforge-key">
+				{{ formatMessage(messages.cfKeyLabel) }}
+			</label>
+			<div class="flex flex-wrap items-center gap-2">
+				<Input
+					id="terrarium-curseforge-key"
+					v-model="cfKeyInput"
+					type="password"
+					:placeholder="formatMessage(messages.cfKeyPlaceholder)"
+					autocomplete="off"
+					:spellcheck="false"
+					wrapper-class="flex-1 min-w-[16rem]"
+					@keyup.enter="saveCurseForgeKey"
+				/>
+				<Button
+					type="colored"
+					color="brand"
+					:disabled="cfBusy || !cfKeyInput.trim()"
+					@click="saveCurseForgeKey"
+				>
+					<SpinnerIcon v-if="cfBusy" class="animate-spin" />
+					<KeyIcon v-else />
+					{{ formatMessage(messages.cfSave) }}
+				</Button>
+				<Button
+					v-if="state.curseforge_api_key"
+					type="outlined"
+					color="red"
+					:disabled="cfBusy"
+					@click="removeCurseForgeKey"
+				>
+					<TrashIcon />
+					{{ formatMessage(messages.remove) }}
+				</Button>
+			</div>
+		</div>
 	</section>
 </template>

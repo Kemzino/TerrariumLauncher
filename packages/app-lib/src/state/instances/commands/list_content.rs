@@ -276,7 +276,7 @@ async fn list_content_inner(
 
     content_files_to_content_items(
         &resolved.instance,
-        resolved.content_set.loader,
+        &resolved.content_set,
         &files,
         cache_behaviour,
         state,
@@ -317,7 +317,7 @@ pub(crate) async fn list_linked_modpack_content(
 
         return content_files_to_content_items(
             &resolved.instance,
-            resolved.content_set.loader,
+            &resolved.content_set,
             &files,
             cache_behaviour,
             state,
@@ -359,7 +359,7 @@ pub(crate) async fn list_linked_modpack_content(
 
     content_files_to_content_items(
         &resolved.instance,
-        resolved.content_set.loader,
+        &resolved.content_set,
         &files,
         cache_behaviour,
         state,
@@ -574,6 +574,7 @@ pub(crate) async fn dependencies_to_content_items(
                 date_added: None,
                 source_kind: None,
                 embedded_metadata: None,
+                curseforge: None,
             })
         })
         .collect::<Vec<_>>();
@@ -894,11 +895,12 @@ fn file_update_cache_key(
 
 async fn content_files_to_content_items(
     instance: &Instance,
-    loader: ModLoader,
+    content_set: &ContentSet,
     files: &[(String, ContentFile)],
     cache_behaviour: Option<CacheBehaviour>,
     state: &State,
 ) -> crate::Result<Vec<ContentItem>> {
+    let loader = content_set.loader;
     let project_ids = files
         .iter()
         .filter_map(|(_, file)| {
@@ -929,6 +931,17 @@ async fn content_files_to_content_items(
         )
         .await?;
     let instance_path = state.directories.instances_dir().join(&instance.path);
+    // Terrarium: файли не з Modrinth — пробуємо впізнати на CurseForge
+    let curseforge =
+        crate::api::terrarium_curseforge::resolve_curseforge_content(
+            &instance_path,
+            &content_set.game_version,
+            loader,
+            files,
+            cache_behaviour,
+            state,
+        )
+        .await;
     let paths = files
         .iter()
         .map(|(path, _)| instance_path.join(path))
@@ -995,6 +1008,7 @@ async fn content_files_to_content_items(
                 date_added: modification_times[index].clone(),
                 source_kind: file.source_kind,
                 embedded_metadata: embedded_metadata.get(&file.hash).cloned(),
+                curseforge: curseforge.get(&file.hash).cloned(),
             }
         })
         .collect::<Vec<_>>();

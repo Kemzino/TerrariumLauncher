@@ -36,6 +36,7 @@
 									<ProjectCardTitle :title="title" compact />
 									<ProjectCardAuthor v-if="author" :author="author" />
 									<ProjectStatusBadge v-if="status" :status="status" class="text-sm" />
+									<CurseForgeBadge v-if="curseforge" />
 								</div>
 								<div class="m-0 font-normal line-clamp-2">
 									{{ summary }}
@@ -116,6 +117,7 @@
 					<ProjectCardTitle :title="title" />
 					<ProjectCardAuthor v-if="author" :author="author" />
 					<ProjectStatusBadge v-if="status" :status="status" />
+					<CurseForgeBadge v-if="curseforge" />
 				</div>
 				<div class="project-card-summary m-0 font-normal line-clamp-2">
 					{{ summary }}
@@ -196,6 +198,7 @@ import type { RouteLocationRaw } from 'vue-router'
 
 import { AutoLink, Avatar } from '../../base'
 import { SmartClickable } from '../../base/index.ts'
+import CurseForgeBadge from '../CurseForgeBadge.vue'
 import ProjectStatusBadge from '../ProjectStatusBadge.vue'
 import ServerModpackContent from '../server/ServerModpackContent.vue'
 import ServerOnlinePlayers from '../server/ServerOnlinePlayers.vue'
@@ -225,6 +228,8 @@ const props = defineProps<{
 		name: string
 		link?: string
 	}
+	/** Terrarium: проєкт із CurseForge — показати значок */
+	curseforge?: boolean
 	summary?: string
 	tags?: string[]
 	allTags?: string[]

@@ -89,7 +89,11 @@ export function useButtonMenuNavigation(
 
 	function getItems() {
 		if (!panel.value) return []
-		return Array.from(panel.value.querySelectorAll<HTMLElement>(itemSelector))
+		// Панелі вкладених підменю рендеряться всередині цієї — їхні пункти
+		// належать їм, а не нам
+		return Array.from(panel.value.querySelectorAll<HTMLElement>(itemSelector)).filter(
+			(item) => item.closest('[role="menu"]') === panel.value,
+		)
 	}
 
 	function focusItem(index: number) {

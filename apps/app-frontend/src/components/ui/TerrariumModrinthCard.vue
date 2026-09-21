@@ -26,11 +26,16 @@ const { handleError, addNotification } = injectNotificationManager()
 const queryClient = useQueryClient()
 
 const messages = defineMessages({
-	title: { id: 'terrarium.modrinth.title', defaultMessage: 'Modrinth App на цьому ПК' },
+	title: { id: 'terrarium.modrinth.title', defaultMessage: 'Спільна тека з Modrinth App' },
 	found: {
 		id: 'terrarium.modrinth.found',
 		defaultMessage:
 			'Знайдено Modrinth App: {count, plural, =0 {без збірок} one {# збірка} few {# збірки} other {# збірок}} у {path}',
+	},
+	sharedDetails: {
+		id: 'terrarium.modrinth.shared-details',
+		defaultMessage:
+			'Terrarium і Modrinth App працюють з однією текою: {count, plural, =0 {збірки} one {# збірка} few {# збірки} other {# збірок}}, Java і кеш спільні, нічого не дублюється. Тека: {path}',
 	},
 	notFound: {
 		id: 'terrarium.modrinth.not-found',
@@ -46,7 +51,10 @@ const messages = defineMessages({
 		id: 'terrarium.modrinth.use-dir-done',
 		defaultMessage: 'Теку змінено на {path}. Перезапусти лаунчер — потім можна підхопити збірки.',
 	},
-	shared: { id: 'terrarium.modrinth.shared', defaultMessage: 'Тека даних спільна з Modrinth App' },
+	shared: {
+		id: 'terrarium.modrinth.shared',
+		defaultMessage: 'Обидва лаунчери використовують цю теку одночасно',
+	},
 	importable: {
 		id: 'terrarium.modrinth.importable',
 		defaultMessage:
@@ -143,19 +151,23 @@ defineExpose({ reload: load })
 		</p>
 
 		<template v-else>
-			<p class="m-0 mt-2 text-sm text-secondary">
-				{{ formatMessage(messages.found, { count: info.instances, path: info.path }) }}
-			</p>
-
 			<template v-if="info.already_shared">
-				<p class="m-0 mt-2 flex items-center gap-2 text-sm text-brand">
+				<p class="m-0 mt-2 flex items-center gap-2 text-sm font-medium text-brand">
 					<CheckCircleIcon class="shrink-0" /> {{ formatMessage(messages.shared) }}
+				</p>
+				<p class="m-0 mt-1 text-sm text-secondary">
+					{{ formatMessage(messages.sharedDetails, { count: info.instances, path: info.path }) }}
 				</p>
 				<p class="m-0 mt-1 text-sm text-secondary">
 					{{ formatMessage(messages.importable, { count: info.importable }) }}
 				</p>
 			</template>
-			<p v-else class="m-0 mt-2 text-sm text-secondary">{{ formatMessage(messages.explain) }}</p>
+			<template v-else>
+				<p class="m-0 mt-2 text-sm text-secondary">
+					{{ formatMessage(messages.found, { count: info.instances, path: info.path }) }}
+				</p>
+				<p class="m-0 mt-2 text-sm text-secondary">{{ formatMessage(messages.explain) }}</p>
+			</template>
 
 			<p v-if="pendingRestart" class="m-0 mt-2 text-sm text-orange">
 				{{ formatMessage(messages.restartHint) }}

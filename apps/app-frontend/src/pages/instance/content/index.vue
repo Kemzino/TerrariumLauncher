@@ -56,6 +56,7 @@
 					ref="exportModal"
 					:instance="instance"
 				/>
+				<TerrariumCurseForgeVersionsModal ref="curseforgeVersionsModal" />
 				<ContentUpdaterModal
 					v-if="updatingProject || updatingModpack"
 					ref="contentUpdaterModal"
@@ -91,7 +92,13 @@
 
 <script setup lang="ts">
 import type { Labrinth } from '@modrinth/api-client'
-import { ClipboardCopyIcon, FolderOpenIcon, LockIcon, LockOpenIcon } from '@modrinth/assets'
+import {
+	ClipboardCopyIcon,
+	ExternalIcon,
+	FolderOpenIcon,
+	LockIcon,
+	LockOpenIcon,
+} from '@modrinth/assets'
 import {
 	type BulkOperationStatus,
 	type ButtonMenuOption,
@@ -102,6 +109,7 @@ import {
 	type ContentItem,
 	type ContentOwner,
 	ContentUpdaterModal,
+	curseforgeTableFields,
 	dedupeManagedContentItems,
 	defineMessages,
 	injectNotificationManager,
@@ -129,6 +137,7 @@ import { useRoute, useRouter } from 'vue-router'
 import ExportModal from '@/components/ui/ExportModal.vue'
 import SyncedContentModal from '@/components/ui/instance/SyncedContentModal.vue'
 import ShareModalWrapper from '@/components/ui/modal/ShareModalWrapper.vue'
+import TerrariumCurseForgeVersionsModal from '@/components/ui/TerrariumCurseForgeVersionsModal.vue'
 import { useManagedContentPolicy } from '@/composables/instances/use-managed-content-policy'
 import { useSyncedPackActions } from '@/composables/instances/use-synced-pack-actions'
 import { useAppEvent } from '@/composables/use-app-event'
@@ -155,6 +164,7 @@ import { set_synced_pack_enabled, syncedPackKeys } from '@/helpers/synced-packs'
 import {
 	modGroupOf,
 	terrarium_create_mod_group,
+	terrarium_curseforge_switch_file,
 	terrarium_delete_mod_group,
 	terrarium_list_mod_groups,
 	terrarium_rename_mod_group,
@@ -208,6 +218,10 @@ const messages = defineMessages({
 	freezeContent: {
 		id: 'app.instance.mods.freeze-content',
 		defaultMessage: 'Freeze version',
+	},
+	openOnCurseForge: {
+		id: 'app.instance.mods.open-on-curseforge',
+		defaultMessage: 'Відкрити на CurseForge',
 	},
 	unfreezeContent: {
 		id: 'app.instance.mods.unfreeze-content',
@@ -377,6 +391,7 @@ const isPackLocked = computed(
 const shareModal = ref<InstanceType<typeof ShareModalWrapper> | null>()
 const exportModal = ref(null)
 const contentUpdaterModal = ref<InstanceType<typeof ContentUpdaterModal> | null>()
+const curseforgeVersionsModal = ref<InstanceType<typeof TerrariumCurseForgeVersionsModal> | null>()
 const managedContentModal = ref<InstanceType<typeof ManagedContentModal> | null>()
 const modpackUpdateConfirmModal = ref<InstanceType<typeof ConfirmModpackUpdateModal> | null>()
 const sharedDisableConfirmModal = ref<InstanceType<typeof ConfirmDisableModal> | null>()
@@ -1087,7 +1102,14 @@ async function switchProjectVersion(mod: ContentItem, version: Labrinth.Versions
 }
 
 async function handleUpdate(id: string) {
-	const item = projects.value.find((p) => getContentItemId(p) === id)
+	const item = listItems.value.find((p) => getContentItemId(p) === id)
+	// Terrarium: оновлення з CurseForge — той самий список файлів з
+	// передвибраним новішим; якщо автор заборонив завантаження, модалка
+	// запропонує відкрити сторінку
+	if (item?.curseforge?.update && !item.project) {
+		openCurseForgeVersions(item, item.curseforge.update.file_id)
+		return
+	}
 	if (!item || item.locked || !canUpdateProject(item) || !item.project?.id || !item.version?.id)
 		return
 
@@ -1198,8 +1220,49 @@ async function handleUpdate(id: string) {
 	updatingProjectVersions.value = versions
 }
 
+// Terrarium: зміна версії мода з CurseForge — свій список файлів і своя
+// установка (завантаження з CF, заміна файлу в тій самій групі)
+function openCurseForgeVersions(item: ContentItem, preselectFileId?: number) {
+	const cf = item.curseforge
+	if (!cf) return
+	curseforgeVersionsModal.value?.show({
+		modId: cf.mod_id,
+		slug: cf.slug,
+		modName: cf.name,
+		iconUrl: cf.icon_url,
+		gameVersion: instance.value.game_version,
+		// Для ресурспаків/шейдерів/датапаків завантажувач не фільтрує файли
+		loader: item.project_type === 'mod' ? instance.value.loader : null,
+		currentFileId: cf.file_id,
+		preselectFileId,
+		onSelect: async (file) => {
+			await switchCurseForgeFile(item, file.id)
+		},
+	})
+}
+
+async function switchCurseForgeFile(item: ContentItem, fileId: number) {
+	const cf = item.curseforge
+	if (!cf || !item.file_path || !canChangeContentVersion(item)) return
+	const operation = beginContentOperation(item)
+	if (!operation) return
+	try {
+		await terrarium_curseforge_switch_file(instance.value.id, item.file_path, cf.mod_id, fileId)
+	} catch (err) {
+		handleError(err as Error)
+		throw err
+	} finally {
+		await refreshContentState('must_revalidate')
+		finishContentOperation(item, operation)
+	}
+}
+
 async function handleSwitchVersion(item: ContentItem) {
 	if (!canChangeContentVersion(item)) return
+	if (item.curseforge && !item.project) {
+		openCurseForgeVersions(item)
+		return
+	}
 	if (!item.project?.id || !item.version?.id) return
 
 	const requestId = beginUpdateRequest()
@@ -1554,10 +1617,13 @@ async function refreshModGroups() {
 // initProjects() з кешем; якщо він стартує першим, TanStack дедуплікує наш
 // must_revalidate у нього — і список лишається старим. Тому спершу скасовуємо
 // активний запит цієї query, потім перечитуємо примусово.
+// Моди збірки в списку — з окремого запиту (linkedContent), тож і його треба
+// перечитати, інакше переміщений мод збірки лишається у старій групі до
+// перезавантаження сторінки. Шляхи файлів там із локальної БД — мережа не потрібна.
 async function afterModGroupChange() {
 	await refreshModGroups()
 	await queryClient.cancelQueries({ queryKey: instanceKeys.content(instance.value.id) })
-	await initProjects('must_revalidate')
+	await Promise.all([initProjects('must_revalidate'), refreshManagedContentItems()])
 }
 
 // Файловий watcher бачить перейменування jar/папок із затримкою ~1 с і сам
@@ -1570,6 +1636,7 @@ function scheduleContentRefresh() {
 		editedRefreshTimer = null
 		void refreshModGroups()
 		void initProjects('must_revalidate')
+		void refreshManagedContentItems()
 	}, 300)
 }
 
@@ -1640,6 +1707,25 @@ function getOverflowOptions(item: ContentItem): ButtonMenuOption[] {
 				)
 			},
 		})
+	} else if (item.curseforge) {
+		// Terrarium: мод із CurseForge — сторінка мода й посилання
+		const cf = item.curseforge
+		options.push(
+			{
+				id: 'open-curseforge',
+				label: formatMessage(messages.openOnCurseForge),
+				icon: ExternalIcon,
+				action: () => void openUrl(cf.url),
+			},
+			{
+				id: 'copy-link',
+				label: formatMessage(commonMessages.copyLinkButton),
+				icon: ClipboardCopyIcon,
+				action: async () => {
+					await navigator.clipboard.writeText(cf.url)
+				},
+			},
+		)
 	}
 
 	if (canMutateContent(item)) {
@@ -1828,8 +1914,12 @@ provideContentManager({
 		locked: item.locked,
 		installing: item.installing,
 		hideDelete: !canDeleteContent(item),
-		hideSwitchVersion: !canChangeContentVersion(item) || !item.project?.id || !item.version?.id,
+		hideSwitchVersion:
+			!canChangeContentVersion(item) ||
+			(!item.curseforge && (!item.project?.id || !item.version?.id)),
 		hasUpdate: canUpdateProject(item) && !item.locked,
+		// Terrarium: мод із CurseForge — іконка, посилання, бейдж, оновлення звідти
+		...curseforgeTableFields(item, instancePage.instanceId.value),
 	}),
 	showSharedContentFilter,
 	filterPersistKey: instance.value.id,

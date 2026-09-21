@@ -357,6 +357,27 @@ async fn ensure_not_running(
     Ok(())
 }
 
+/// Оновлення/зміна версії мода з групи закінчується переміщенням нового файлу
+/// в ту саму групу (`set_mod_group`), а це заборонено під час гри. Перевіряємо
+/// до завантаження — інакше старий файл уже видалено, новий лежить у корені,
+/// і лише тоді падає помилка.
+pub(crate) async fn ensure_group_update_allowed(
+    instance_id: &str,
+    project_path: &str,
+    state: &State,
+) -> crate::Result<()> {
+    let Some(group) = group_of(project_path) else {
+        return Ok(());
+    };
+    if instance_has_running_process(instance_id, state).await? {
+        return Err(crate::ErrorKind::OtherError(format!(
+            "Закрий гру, щоб оновити мод у групі «{group}»"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
 /// Перейменувати в БД усі файли з префіксом `old_prefix` (шлях папки на
 /// диску, без завершального `/`) на `new_prefix`.
 async fn rename_db_prefix(

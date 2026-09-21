@@ -23,6 +23,19 @@ import {
 	get_version_many,
 } from '@/helpers/cache.js'
 import {
+	cfModToProject,
+	cfModToVersions,
+	curseforgeFileId,
+	curseforgeModId,
+	curseforgeVersionId,
+	getCurseForgeMeta,
+	isCurseForgeProjectId,
+	isCurseForgeVersionId,
+	terrarium_curseforge_get_mod,
+	terrarium_curseforge_install,
+	terrarium_curseforge_prepare_modpack,
+} from '@/helpers/curseforge'
+import {
 	install_create_instance,
 	install_create_modpack_instance,
 	installJobInstanceId,
@@ -608,11 +621,50 @@ export function createContentInstall(opts: {
 		return targets
 	}
 
+	// Terrarium: установка мода з CurseForge — бекенд сам тягне файл і
+	// обов'язкові залежності; повертаємо id встановленої «версії» (файлу)
+	async function installCurseForge(
+		project: Labrinth.Projects.v2.Project,
+		instanceId: string,
+		versionId: string | null | undefined,
+	): Promise<{ versionId: string; installedProjectIds: string[] }> {
+		const meta = getCurseForgeMeta(project)!
+		const fileId = versionId && isCurseForgeVersionId(versionId) ? curseforgeFileId(versionId) : null
+		const result = await terrarium_curseforge_install(instanceId, meta.mod_id, fileId, true)
+		if (result.failed.length > 0) {
+			opts.handleError(
+				`Не вдалося поставити обов'язкові залежності: ${result.failed.join(', ')}. Постав їх вручну.`,
+			)
+		}
+		return { versionId: versionId ?? curseforgeVersionId(0), installedProjectIds: [project.id] }
+	}
+
 	async function handleInstallToInstance(instance: ContentInstallInstance) {
 		const selectedInstance = instanceMap[instance.id]
 		const storeInstance = instances.value.find((i) => i.id === instance.id)
 		if (!currentProject || !selectedInstance) {
 			opts.handleError('No project or instance found')
+			return
+		}
+
+		if (getCurseForgeMeta(currentProject)) {
+			if (storeInstance) storeInstance.installing = true
+			try {
+				const preferred = findPreferredVersion(currentVersions, currentProject, selectedInstance)
+				const { versionId, installedProjectIds } = await installCurseForge(
+					currentProject,
+					instance.id,
+					preferred?.id ?? null,
+				)
+				if (storeInstance) {
+					storeInstance.installed = true
+					storeInstance.installing = false
+				}
+				currentCallback(versionId, installedProjectIds)
+			} catch (err) {
+				if (storeInstance) storeInstance.installing = false
+				opts.handleError(err)
+			}
 			return
 		}
 
@@ -833,6 +885,47 @@ export function createContentInstall(opts: {
 		createInstanceCallback: (instanceId: string) => void = () => {},
 		hints?: { preferredLoader?: string; preferredGameVersion?: string; showProjectInfo?: boolean },
 	) {
+		if (isCurseForgeProjectId(projectId)) {
+			const mod = await terrarium_curseforge_get_mod(curseforgeModId(projectId))
+			const cfProject = cfModToProject(mod)
+			const cfVersions = cfModToVersions(mod)
+			if (cfProject.project_type === 'modpack') {
+				// Збірка CF → .mrpack → звичайна установка збірки (новий примірник)
+				const fileId =
+					versionId && isCurseForgeVersionId(versionId) ? curseforgeFileId(versionId) : null
+				const prepared = await terrarium_curseforge_prepare_modpack(mod.id, fileId)
+				if (prepared.missing.length > 0) {
+					opts.handleError(
+						`Автори заборонили сторонні завантаження для: ${prepared.missing.join(', ')}. Збірка встановиться без них — додай їх вручну зі сторінок CurseForge.`,
+					)
+				}
+				const job = await install_create_modpack_instance(
+					{ type: 'fromFile', path: prepared.mrpack_path },
+					{ name: prepared.name, iconPath: prepared.icon_path ?? null },
+				)
+				const newInstanceId = installJobInstanceId(job)
+				if (newInstanceId) createInstanceCallback(newInstanceId)
+				trackEvent('PackInstall', {
+					id: cfProject.id,
+					version_id: versionId ?? null,
+					title: cfProject.title,
+					source,
+				})
+				callback(versionId ?? curseforgeVersionId(fileId ?? 0))
+				return
+			}
+			if (instanceId) {
+				const { versionId: installedId, installedProjectIds } = await installCurseForge(
+					cfProject,
+					instanceId,
+					versionId,
+				)
+				callback(installedId, installedProjectIds)
+			} else {
+				await showModInstallModal(cfProject, cfVersions, callback, hints)
+			}
+			return
+		}
 		const project: Labrinth.Projects.v2.Project = await get_project(projectId, 'must_revalidate')
 
 		if (!project) {

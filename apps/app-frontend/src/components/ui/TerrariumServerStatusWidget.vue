@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDownIcon, RefreshCwIcon, ServerIcon, UsersIcon } from '@modrinth/assets'
+import { RefreshCwIcon, ServerIcon, UsersIcon } from '@modrinth/assets'
 import { Button, defineMessages, useVIntl } from '@modrinth/ui'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
@@ -17,20 +17,12 @@ const messages = defineMessages({
 	online: { id: 'terrarium.server-status.online', defaultMessage: 'Онлайн: {players} / {max}' },
 	offline: { id: 'terrarium.server-status.offline', defaultMessage: 'Сервер недоступний' },
 	ping: { id: 'terrarium.server-status.ping', defaultMessage: '{ping} мс' },
-	noSample: {
-		id: 'terrarium.server-status.no-sample',
-		defaultMessage: 'Сервер не показує список гравців',
-	},
-	nobody: { id: 'terrarium.server-status.nobody', defaultMessage: 'Зараз нікого немає' },
-	showPlayers: { id: 'terrarium.server-status.show-players', defaultMessage: 'Показати гравців' },
-	hidePlayers: { id: 'terrarium.server-status.hide-players', defaultMessage: 'Сховати гравців' },
 	refresh: { id: 'terrarium.server-status.refresh', defaultMessage: 'Оновити' },
 })
 
 const status = ref<ServerStatus | null>(null)
 const online = ref<boolean | null>(null)
 const loading = ref(false)
-const expanded = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 
 async function refresh() {
@@ -97,25 +89,6 @@ onBeforeUnmount(() => {
 						{{ formatMessage(messages.ping, { ping: status.ping }) }}
 					</span>
 				</p>
-				<Button
-					v-if="status.players.online > 0"
-					size="sm"
-					type="transparent"
-					class="mt-1 !px-0"
-					@click="expanded = !expanded"
-				>
-					<ChevronDownIcon class="transition-transform" :class="{ '-rotate-90': !expanded }" />
-					{{ expanded ? formatMessage(messages.hidePlayers) : formatMessage(messages.showPlayers) }}
-				</Button>
-				<p v-else class="m-0 mt-1 text-sm text-secondary">{{ formatMessage(messages.nobody) }}</p>
-				<ul v-if="expanded && status.players.sample.length" class="terrarium-status__players">
-					<li v-for="player in status.players.sample" :key="player.id || player.name">
-						{{ player.name }}
-					</li>
-				</ul>
-				<p v-else-if="expanded" class="m-0 mt-1 text-sm text-secondary">
-					{{ formatMessage(messages.noSample) }}
-				</p>
 			</template>
 			<p v-else class="m-0 text-secondary">{{ formatMessage(messages.offline) }}</p>
 		</div>
@@ -143,22 +116,5 @@ onBeforeUnmount(() => {
 	font-size: 0.75rem;
 	font-weight: 400;
 	color: var(--color-secondary);
-}
-
-.terrarium-status__players {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.35rem;
-	margin: 0.5rem 0 0;
-	padding: 0;
-	list-style: none;
-
-	li {
-		padding: 0.15rem 0.6rem;
-		border-radius: 999px;
-		background: var(--color-button-bg);
-		font-size: 0.85rem;
-		color: var(--color-contrast);
-	}
 }
 </style>

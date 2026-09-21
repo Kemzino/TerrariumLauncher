@@ -45,7 +45,9 @@
 							id: 'open-in-browser',
 							label: formatMessage(commonMessages.openInBrowserButton),
 							type: 'link',
-							href: `https://modrinth.com/${project.project_type}/${project.slug}/version/${version.id}`,
+							href: curseforgeMeta
+								? (version.files[0]?.url ?? curseforgeMeta.url)
+								: `https://modrinth.com/${project.project_type}/${project.slug}/version/${version.id}`,
 							target: '_blank',
 						},
 						{
@@ -53,6 +55,7 @@
 							label: formatMessage(commonMessages.reportButton),
 							type: 'link',
 							tone: 'red',
+							shown: !curseforgeMeta,
 							href: `https://modrinth.com/report?item=version&itemID=${version.id}`,
 							target: '_blank',
 						},
@@ -102,6 +105,14 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { SwapIcon } from '@/assets/icons'
 import { get_project_many, get_version_many } from '@/helpers/cache.js'
+import {
+	cfModToProject,
+	curseforgeFileId,
+	curseforgeModId,
+	getCurseForgeMeta,
+	terrarium_curseforge_get_changelog,
+	terrarium_curseforge_get_mod,
+} from '@/helpers/curseforge'
 import { useBreadcrumb } from '@/providers/breadcrumbs'
 
 const { formatMessage } = useVIntl()
@@ -162,6 +173,8 @@ useBreadcrumb({
 
 const enrichment = ref<Labrinth.Projects.v2.DependencyInfo | undefined>(undefined)
 const enrichmentLoading = ref(false)
+// Terrarium: версія мода з CurseForge — залежності й чейнджлог звідти
+const curseforgeMeta = computed(() => getCurseForgeMeta(props.project))
 
 function buildProjectHref(path: string): string {
 	const params = new URLSearchParams()
@@ -188,8 +201,40 @@ function createDependencyLink(context: DependencyContext): string | undefined {
 	return undefined
 }
 
+async function refreshCurseForgeEnrichment() {
+	const meta = curseforgeMeta.value
+	const current = version.value
+	if (!meta || !current) return
+	enrichmentLoading.value = true
+	try {
+		const depIds = [...new Set((current.dependencies ?? []).map((d) => d.project_id).filter(Boolean))]
+		const [changelog, ...mods] = await Promise.all([
+			current.changelog == null
+				? terrarium_curseforge_get_changelog(meta.mod_id, curseforgeFileId(current.id)).catch(
+						() => '',
+					)
+				: Promise.resolve(current.changelog),
+			...depIds.map((id) => terrarium_curseforge_get_mod(curseforgeModId(id!)).catch(() => null)),
+		])
+		if (version.value?.id !== current.id) return
+		if (current.changelog == null) {
+			version.value = { ...current, changelog: changelog ?? '' }
+		}
+		enrichment.value = {
+			projects: mods.filter((m) => !!m).map((m) => cfModToProject(m!)),
+			versions: [],
+		}
+	} finally {
+		enrichmentLoading.value = false
+	}
+}
+
 async function refreshEnrichment() {
 	if (!version.value) return
+	if (curseforgeMeta.value) {
+		await refreshCurseForgeEnrichment()
+		return
+	}
 
 	const projectIds = new Set<string>()
 	const versionIds = new Set<string>()

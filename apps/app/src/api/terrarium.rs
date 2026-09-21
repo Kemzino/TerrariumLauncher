@@ -17,6 +17,7 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             terrarium_get_state,
             terrarium_set_state,
             terrarium_fetch_latest_release,
+            terrarium_list_releases,
             terrarium_download_release,
             terrarium_verify_admin_token,
             terrarium_publish_release,
@@ -36,6 +37,18 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             terrarium_use_modrinth_directory,
             terrarium_import_modrinth_instances,
             terrarium_open_discord,
+            terrarium_curseforge_has_key,
+            terrarium_curseforge_list_files,
+            terrarium_curseforge_switch_file,
+            terrarium_curseforge_get_mod,
+            terrarium_curseforge_get_description,
+            terrarium_curseforge_get_changelog,
+            terrarium_curseforge_get_files,
+            terrarium_curseforge_get_file,
+            terrarium_curseforge_get_categories,
+            terrarium_curseforge_search,
+            terrarium_curseforge_install,
+            terrarium_curseforge_prepare_modpack,
         ])
         .build()
 }
@@ -257,4 +270,157 @@ pub async fn terrarium_open_discord<R: tauri::Runtime>(
         .as_error()
     })?;
     Ok(use_app)
+}
+
+/// Чи є ключ CurseForge API (з налаштувань або вбудований) — без нього
+/// моди не з Modrinth показуються без іконок і оновлень.
+#[tauri::command]
+pub async fn terrarium_curseforge_has_key() -> Result<bool> {
+    Ok(theseus::terrarium_curseforge::has_api_key().await)
+}
+
+/// Файли мода з CurseForge для версії гри/завантажувача (вибір версії).
+#[tauri::command]
+pub async fn terrarium_curseforge_list_files(
+    mod_id: u64,
+    slug: String,
+    game_version: String,
+    loader: Option<theseus::prelude::ModLoader>,
+) -> Result<Vec<theseus::terrarium_curseforge::CurseForgeFile>> {
+    Ok(theseus::terrarium_curseforge::list_mod_files(
+        mod_id,
+        slug,
+        game_version,
+        loader,
+    )
+    .await?)
+}
+
+/// Замінити файл мода з CurseForge на інший (зміна версії / оновлення).
+#[tauri::command]
+pub async fn terrarium_curseforge_switch_file(
+    instance_id: String,
+    project_path: String,
+    mod_id: u64,
+    file_id: u64,
+) -> Result<String> {
+    Ok(theseus::terrarium_curseforge::switch_mod_file(
+        instance_id,
+        project_path,
+        mod_id,
+        file_id,
+    )
+    .await?)
+}
+
+// --- CurseForge як повноцінне джерело: сторінка проєкту, пошук, установка
+
+#[tauri::command]
+pub async fn terrarium_curseforge_get_mod(
+    mod_id: u64,
+    force: Option<bool>,
+) -> Result<theseus::terrarium_curseforge::CurseForgeMod> {
+    Ok(theseus::terrarium_curseforge::get_mod(mod_id, force.unwrap_or(false))
+        .await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_curseforge_get_description(mod_id: u64) -> Result<String> {
+    Ok(theseus::terrarium_curseforge::get_mod_description(mod_id).await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_curseforge_get_changelog(
+    mod_id: u64,
+    file_id: u64,
+) -> Result<String> {
+    Ok(theseus::terrarium_curseforge::get_file_changelog(mod_id, file_id).await?)
+}
+
+#[derive(serde::Serialize)]
+pub struct CurseForgeFilesPage {
+    pub files: Vec<theseus::terrarium_curseforge::CurseForgeFileDetails>,
+    pub total: u64,
+}
+
+#[tauri::command]
+pub async fn terrarium_curseforge_get_files(
+    mod_id: u64,
+    slug: String,
+    game_version: Option<String>,
+    loader: Option<theseus::prelude::ModLoader>,
+    index: Option<u64>,
+) -> Result<CurseForgeFilesPage> {
+    let (files, total) = theseus::terrarium_curseforge::get_mod_files(
+        mod_id,
+        slug,
+        game_version,
+        loader,
+        index.unwrap_or(0),
+    )
+    .await?;
+    Ok(CurseForgeFilesPage { files, total })
+}
+
+#[tauri::command]
+pub async fn terrarium_curseforge_get_file(
+    mod_id: u64,
+    file_id: u64,
+    slug: String,
+) -> Result<theseus::terrarium_curseforge::CurseForgeFileDetails> {
+    Ok(theseus::terrarium_curseforge::get_file(mod_id, file_id, slug).await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_curseforge_get_categories(
+    project_type: Option<theseus::prelude::ProjectType>,
+) -> Result<Vec<theseus::terrarium_curseforge::CurseForgeCategory>> {
+    Ok(theseus::terrarium_curseforge::get_categories(project_type).await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_curseforge_search(
+    params: theseus::terrarium_curseforge::CurseForgeSearchParams,
+) -> Result<theseus::terrarium_curseforge::CurseForgeSearchResult> {
+    Ok(theseus::terrarium_curseforge::search(params).await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_curseforge_install(
+    instance_id: String,
+    mod_id: u64,
+    file_id: Option<u64>,
+    with_dependencies: Option<bool>,
+) -> Result<theseus::terrarium_curseforge::CurseForgeInstallResult> {
+    Ok(theseus::terrarium_curseforge::install_mod(
+        instance_id,
+        mod_id,
+        file_id,
+        with_dependencies.unwrap_or(true),
+    )
+    .await?)
+}
+
+/// Збірка з CurseForge → .mrpack у кеші (далі — звичайна установка збірки).
+#[tauri::command]
+pub async fn terrarium_curseforge_prepare_modpack(
+    mod_id: u64,
+    file_id: Option<u64>,
+) -> Result<theseus::terrarium_curseforge::CurseForgeModpackPrepared> {
+    Ok(theseus::terrarium_curseforge::prepare_modpack(mod_id, file_id).await?)
+}
+
+/// Список змін збірки (останні релізи) для головної.
+#[tauri::command]
+pub async fn terrarium_list_releases(
+    pack: PackKind,
+    channel: Option<Channel>,
+    limit: Option<u32>,
+) -> Result<Vec<terrarium::TerrariumChangelogEntry>> {
+    Ok(terrarium::list_releases(
+        pack,
+        channel.unwrap_or_default(),
+        limit.unwrap_or(20),
+    )
+    .await?)
 }

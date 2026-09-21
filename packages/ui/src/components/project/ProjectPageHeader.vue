@@ -14,8 +14,9 @@
 			/>
 		</template>
 
-		<template v-if="showStatusBadge" #badges>
-			<ProjectStatusBadge :status="projectV3.status" />
+		<template v-if="showStatusBadge || $slots.badges" #badges>
+			<ProjectStatusBadge v-if="showStatusBadge" :status="projectV3.status" />
+			<slot name="badges" />
 		</template>
 
 		<template #metadata>

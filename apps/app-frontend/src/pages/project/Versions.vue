@@ -36,7 +36,11 @@
 				<ButtonLink
 					v-tooltip="formatMessage(commonMessages.openInBrowserButton)"
 					type="quiet"
-					:href="`https://modrinth.com/${project.project_type}/${project.slug}/version/${version.id}`"
+					:href="
+						curseforgeMeta
+							? (version.files?.[0]?.url ?? curseforgeMeta.url)
+							: `https://modrinth.com/${project.project_type}/${project.slug}/version/${version.id}`
+					"
 					target="_blank"
 					:aria-label="formatMessage(commonMessages.openInBrowserButton)"
 					class="!w-9 !px-0 !rounded-full"
@@ -59,11 +63,12 @@ import {
 	ProjectPageVersions,
 	useVIntl,
 } from '@modrinth/ui'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { SwapIcon } from '@/assets/icons/index.js'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
+import { getCurseForgeMeta } from '@/helpers/curseforge'
 import { get_game_versions, get_loaders } from '@/helpers/tags.js'
 
 const { formatMessage } = useVIntl()
@@ -76,7 +81,7 @@ const messages = defineMessages({
 	},
 })
 
-defineProps({
+const props = defineProps({
 	project: {
 		type: Object,
 		default: () => {},
@@ -106,6 +111,9 @@ defineProps({
 		default: null,
 	},
 })
+
+// Terrarium: проєкт із CurseForge — посилання на файл ведуть на curseforge.com
+const curseforgeMeta = computed(() => getCurseForgeMeta(props.project))
 
 const { handleError } = injectNotificationManager()
 const route = useRoute()
