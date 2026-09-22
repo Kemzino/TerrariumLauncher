@@ -70,8 +70,20 @@ function onContentClick(event: MouseEvent) {
 				:key="embed.url ?? embed.title ?? ''"
 				class="news-message__embed"
 			>
-				<strong v-if="embed.title">{{ embed.title }}</strong>
-				<span v-if="embed.description">{{ embed.description }}</span>
+				<!-- eslint-disable vue/no-v-html -- вміст екрановано в renderDiscordMarkdown -->
+				<strong
+					v-if="embed.title"
+					class="news-message__content"
+					@click="onContentClick"
+					v-html="renderDiscordMarkdown(embed.title, item.mentions)"
+				/>
+				<span
+					v-if="embed.description"
+					class="news-message__content"
+					@click="onContentClick"
+					v-html="renderDiscordMarkdown(embed.description, item.mentions)"
+				/>
+				<!-- eslint-enable vue/no-v-html -->
 				<img
 					v-if="embed.image"
 					:src="embed.image"

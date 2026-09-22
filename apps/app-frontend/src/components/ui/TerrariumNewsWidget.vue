@@ -222,8 +222,9 @@ onBeforeUnmount(() => {
 
 		<div v-show="!collapsed" class="terrarium-widget__body terrarium-news__body">
 			<div v-if="channels.length" class="terrarium-news__tabs" role="tablist">
-				<!-- Вкладка з емодзі в назві: згорнута до емодзі, розкривається при
-				     наведенні; активна — розкрита завжди. Без емодзі — повна назва -->
+				<!-- Вкладка з емодзі в назві: лише емодзі; назва спливає поверх при
+				     наведенні, тож рядок вкладок не росте й не переноситься. Без
+				     емодзі — повна назва. Назва відкритого каналу — підписом нижче -->
 				<button
 					v-for="channel in channels"
 					:key="channel.id"
@@ -245,6 +246,13 @@ onBeforeUnmount(() => {
 					<span class="terrarium-news__tab-label">{{ channelLabel(channel.name) }}</span>
 					<span v-if="channelHasUnread(channel)" class="terrarium-news__dot" aria-hidden="true" />
 				</button>
+			</div>
+
+			<div v-if="activeChannel" class="terrarium-news__current">
+				<span class="terrarium-news__current-emoji">{{
+					channelEmoji(activeChannel.name) ?? '#'
+				}}</span>
+				<span class="terrarium-news__current-label">{{ channelLabel(activeChannel.name) }}</span>
 			</div>
 
 			<!-- Форум: список постів; клік — пост цілком у модалці -->
@@ -337,9 +345,31 @@ onBeforeUnmount(() => {
 
 .terrarium-news__tabs {
 	display: flex;
-	flex-wrap: wrap;
+	flex-wrap: nowrap;
 	gap: 0.3rem;
-	margin-bottom: 0.6rem;
+	min-width: 0;
+	margin-bottom: 0.4rem;
+}
+
+.terrarium-news__current {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	min-width: 0;
+	margin-bottom: 0.5rem;
+	font-size: 0.8rem;
+	font-weight: 600;
+	color: var(--color-contrast);
+}
+
+.terrarium-news__current-emoji {
+	flex-shrink: 0;
+}
+
+.terrarium-news__current-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .terrarium-news__dot {
@@ -391,30 +421,37 @@ onBeforeUnmount(() => {
 	margin-left: 0.3rem;
 }
 
-// Згорнута вкладка: лише емодзі; назва виїжджає при наведенні / фокусі,
-// в активної — завжди видима
+// Згорнута вкладка: лише емодзі; назва спливає поверх сусідів при наведенні /
+// фокусі (position: absolute — ширина рядка не змінюється)
 .terrarium-news__tab.is-compact {
+	position: relative;
 	padding: 0 0.45rem;
 
 	.terrarium-news__tab-label {
-		display: inline-block;
-		max-width: 0;
+		position: absolute;
+		top: 50%;
+		left: calc(100% + 0.25rem);
+		z-index: 2;
 		margin-left: 0;
-		overflow: hidden;
+		padding: 0.2rem 0.55rem;
+		border: 1px solid color-mix(in srgb, var(--color-contrast) 12%, transparent);
+		border-radius: 999px;
+		background: var(--color-raised-bg);
+		box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+		color: var(--color-contrast);
 		opacity: 0;
+		pointer-events: none;
+		transform: translate(-0.25rem, -50%);
 		transition:
-			max-width 0.18s ease,
-			margin-left 0.18s ease,
-			opacity 0.12s ease;
+			opacity 0.12s ease,
+			transform 0.12s ease;
 	}
 
 	&:hover,
-	&:focus-visible,
-	&.is-active {
+	&:focus-visible {
 		.terrarium-news__tab-label {
-			max-width: 12rem;
-			margin-left: 0.3rem;
 			opacity: 1;
+			transform: translate(0, -50%);
 		}
 	}
 }

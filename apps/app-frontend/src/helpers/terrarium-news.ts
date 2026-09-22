@@ -115,6 +115,10 @@ export function renderDiscordMarkdown(text: string, mentions?: NewsMentions) {
 				const name = mentions?.channels?.[id]
 				return mention(name ? `#${name}` : '#канал')
 			})
+			.replace(
+				/(^|\s)@(everyone|here)\b/g,
+				(_, before: string, who: string) => `${before}${mention(`@${who}`)}`,
+			)
 			// Кастомні емодзі <:name:id> / <a:name:id> — з CDN Discord
 			.replace(
 				/&lt;(a?):(\w+):(\d+)&gt;/g,
