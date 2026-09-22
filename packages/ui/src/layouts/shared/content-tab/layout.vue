@@ -718,6 +718,44 @@ const groupedSections = computed<GroupedSection[]>(() =>
 	}),
 )
 
+// Віртуалізація рятує лише велику секцію; коли груп десяток по 10-20 модів,
+// одночасно створюється все одно пів тисячі компонентів і вкладка
+// відкривається ривком. Тому спершу монтуємо кілька перших секцій, а решту —
+// у простої браузера, згори вниз: список доростає нижче видимої частини, тож
+// нічого не стрибає.
+const SECTIONS_AT_ONCE = 3
+const mountedSectionCount = ref(SECTIONS_AT_ONCE)
+// Черга монтування перезапускається на кожен новий набір секцій; стара має
+// зупинитись, інакше лічильник ростиме з кількох ланцюжків одразу
+let mountGeneration = 0
+
+function scheduleNextSections(generation = mountGeneration) {
+	if (typeof window === 'undefined') return
+	if (generation !== mountGeneration) return
+	if (mountedSectionCount.value >= groupedSections.value.length) return
+	const run = () => {
+		if (generation !== mountGeneration) return
+		mountedSectionCount.value += 1
+		scheduleNextSections(generation)
+	}
+	if (typeof window.requestIdleCallback === 'function') {
+		window.requestIdleCallback(run, { timeout: 250 })
+	} else {
+		window.setTimeout(run, 16)
+	}
+}
+
+// Новий набір секцій (інший примірник, пошук, фільтр) — знову згори вниз
+watch(
+	() => groupedSections.value.length,
+	() => {
+		mountGeneration += 1
+		mountedSectionCount.value = SECTIONS_AT_ONCE
+		scheduleNextSections()
+	},
+	{ immediate: true },
+)
+
 function isGroupCollapsed(key: string) {
 	return !!collapsedGroups.value[key]
 }
@@ -1793,7 +1831,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 						<template v-if="showGroupedSections">
 							<div class="mt-2 flex flex-col gap-3">
 								<section
-									v-for="section in groupedSections"
+									v-for="(section, sectionIndex) in groupedSections"
 									:key="section.key"
 									class="mod-group rounded-2xl border border-solid bg-surface-1 transition-colors"
 									:class="[
@@ -1876,6 +1914,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 									     змонтованими (на великих збірках це сотні компонентів) -->
 									<div
 										v-if="
+											sectionIndex < mountedSectionCount &&
 											!isGroupCollapsed(section.key) &&
 											(section.items.length > 0 || section.totalItems === 0)
 										"

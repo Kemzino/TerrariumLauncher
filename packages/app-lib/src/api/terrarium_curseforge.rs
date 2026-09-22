@@ -465,8 +465,11 @@ pub(crate) async fn resolve_curseforge_content(
         return HashMap::new();
     };
     let pool = &state.pool;
-    let revalidate = cache_behaviour == Some(CacheBehaviour::MustRevalidate)
-        || cache_behaviour == Some(CacheBehaviour::Bypass);
+    // Лише Bypass оминає кеш карток модів. MustRevalidate означає «перевір
+    // прострочене», а не «питай API щоразу»: список умісту перечитується після
+    // кожної дії (перемкнув мод, переніс у групу), і мережевий похід за
+    // незміненими картками на кожну таку дію відчувався як підлагування.
+    let revalidate = cache_behaviour == Some(CacheBehaviour::Bypass);
 
     // 1. Відбитки (кеш за sha1; інакше читаємо файл)
     let hashes: Vec<String> = candidates
