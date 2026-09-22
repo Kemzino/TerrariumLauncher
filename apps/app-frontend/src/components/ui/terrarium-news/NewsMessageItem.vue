@@ -44,7 +44,9 @@ function onContentClick(event: MouseEvent) {
 		<Avatar v-if="!compact" :src="item.avatar" size="1.75rem" class="news-message__avatar" circle />
 		<div class="news-message__main">
 			<div v-if="!compact" class="news-message__meta">
-				<strong>{{ item.author }}</strong>
+				<strong :style="item.author_color ? { color: item.author_color } : undefined">{{
+					item.author
+				}}</strong>
 				<span v-tooltip="exactTime(item.timestamp)">{{ relativeTimeUk(item.timestamp) }}</span>
 				<button
 					v-tooltip="formatMessage(messages.openMessage)"
@@ -61,7 +63,7 @@ function onContentClick(event: MouseEvent) {
 				v-if="item.content"
 				class="news-message__content"
 				@click="onContentClick"
-				v-html="renderDiscordMarkdown(item.content)"
+				v-html="renderDiscordMarkdown(item.content, item.mentions)"
 			/>
 			<div
 				v-for="embed in item.embeds"
@@ -138,6 +140,9 @@ function onContentClick(event: MouseEvent) {
 	color: var(--color-secondary);
 
 	strong {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 		color: var(--color-contrast);
 	}
 }
@@ -165,9 +170,30 @@ function onContentClick(event: MouseEvent) {
 	line-height: 1.4;
 	color: var(--color-base);
 	overflow-wrap: anywhere;
+	word-break: break-word;
 
 	:deep(a) {
 		color: var(--color-brand);
+		overflow-wrap: anywhere;
+	}
+
+	:deep(.mention) {
+		padding: 0 0.2em;
+		border-radius: 0.25em;
+		background: var(--color-brand-highlight);
+		color: var(--color-brand);
+		font-weight: 600;
+	}
+
+	:deep(.emoji) {
+		width: 1.25em;
+		height: 1.25em;
+		vertical-align: -0.25em;
+	}
+
+	:deep(small) {
+		font-size: 0.8em;
+		color: var(--color-secondary);
 	}
 
 	:deep(code),
@@ -179,6 +205,8 @@ function onContentClick(event: MouseEvent) {
 	}
 
 	:deep(pre) {
+		max-width: 100%;
+		overflow-x: auto;
 		white-space: pre-wrap;
 		padding: 0.4rem 0.6rem;
 	}
@@ -200,6 +228,8 @@ function onContentClick(event: MouseEvent) {
 	border-radius: var(--radius-sm);
 	background: var(--color-button-bg);
 	font-size: 0.85rem;
+	overflow-wrap: anywhere;
+	word-break: break-word;
 }
 
 .news-message__attachments {

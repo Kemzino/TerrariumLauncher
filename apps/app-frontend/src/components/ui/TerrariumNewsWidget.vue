@@ -8,6 +8,8 @@ import NewsPostModal from '@/components/ui/terrarium-news/NewsPostModal.vue'
 import TerrariumLightbox from '@/components/ui/TerrariumLightbox.vue'
 import { openDiscordLink, openTerrariumLink, TERRARIUM_NEWS_URL } from '@/helpers/terrarium-links'
 import {
+	channelEmoji,
+	channelLabel,
 	imagesOfMessage,
 	imagesOfPost,
 	type NewsChannel,
@@ -220,17 +222,27 @@ onBeforeUnmount(() => {
 
 		<div v-show="!collapsed" class="terrarium-widget__body terrarium-news__body">
 			<div v-if="channels.length" class="terrarium-news__tabs" role="tablist">
+				<!-- Вкладка з емодзі в назві: згорнута до емодзі, розкривається при
+				     наведенні; активна — розкрита завжди. Без емодзі — повна назва -->
 				<button
 					v-for="channel in channels"
 					:key="channel.id"
 					type="button"
 					role="tab"
 					class="terrarium-news__tab"
-					:class="{ 'is-active': channel.id === activeChannel?.id }"
+					:class="{
+						'is-active': channel.id === activeChannel?.id,
+						'is-compact': !!channelEmoji(channel.name),
+					}"
 					:aria-selected="channel.id === activeChannel?.id"
+					:aria-label="channelLabel(channel.name)"
 					@click="selectChannel(channel.id)"
 				>
-					#{{ channel.name }}
+					<span v-if="channelEmoji(channel.name)" class="terrarium-news__tab-emoji">{{
+						channelEmoji(channel.name)
+					}}</span>
+					<span v-else class="terrarium-news__tab-emoji">#</span>
+					<span class="terrarium-news__tab-label">{{ channelLabel(channel.name) }}</span>
 					<span v-if="channelHasUnread(channel)" class="terrarium-news__dot" aria-hidden="true" />
 				</button>
 			</div>
@@ -345,7 +357,10 @@ onBeforeUnmount(() => {
 }
 
 .terrarium-news__tab {
-	padding: 0.2rem 0.6rem;
+	display: inline-flex;
+	align-items: center;
+	height: 1.75rem;
+	padding: 0 0.6rem;
 	border: 1px solid color-mix(in srgb, var(--color-contrast) 12%, transparent);
 	border-radius: 999px;
 	background: transparent;
@@ -353,6 +368,8 @@ onBeforeUnmount(() => {
 	font: inherit;
 	font-size: 0.8rem;
 	font-weight: 600;
+	line-height: 1;
+	white-space: nowrap;
 	cursor: pointer;
 
 	&:hover {
@@ -363,6 +380,42 @@ onBeforeUnmount(() => {
 		border-color: var(--color-brand);
 		background: var(--color-brand-highlight);
 		color: var(--color-brand);
+	}
+}
+
+.terrarium-news__tab-emoji {
+	font-size: 0.95rem;
+}
+
+.terrarium-news__tab-label {
+	margin-left: 0.3rem;
+}
+
+// Згорнута вкладка: лише емодзі; назва виїжджає при наведенні / фокусі,
+// в активної — завжди видима
+.terrarium-news__tab.is-compact {
+	padding: 0 0.45rem;
+
+	.terrarium-news__tab-label {
+		display: inline-block;
+		max-width: 0;
+		margin-left: 0;
+		overflow: hidden;
+		opacity: 0;
+		transition:
+			max-width 0.18s ease,
+			margin-left 0.18s ease,
+			opacity 0.12s ease;
+	}
+
+	&:hover,
+	&:focus-visible,
+	&.is-active {
+		.terrarium-news__tab-label {
+			max-width: 12rem;
+			margin-left: 0.3rem;
+			opacity: 1;
+		}
 	}
 }
 
@@ -384,7 +437,9 @@ onBeforeUnmount(() => {
 	flex: 1 1 auto;
 	flex-direction: column;
 	gap: 0.75rem;
+	min-width: 0;
 	min-height: 6rem;
+	overflow-x: hidden;
 	max-height: 22rem;
 	overflow-y: auto;
 	padding-right: 0.25rem;
