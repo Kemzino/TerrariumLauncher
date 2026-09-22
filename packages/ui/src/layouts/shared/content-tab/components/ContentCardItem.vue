@@ -11,7 +11,6 @@ import {
 	TriangleAlertIcon,
 	UploadIcon,
 } from '@modrinth/assets'
-import { useMagicKeys } from '@vueuse/core'
 import { computed, getCurrentInstance, ref } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 
@@ -24,6 +23,7 @@ import Checkbox from '#ui/components/base/Checkbox.vue'
 import ProgressSpinner from '#ui/components/base/ProgressSpinner.vue'
 import Toggle from '#ui/components/base/Toggle.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
+import { useShiftKey } from '#ui/composables/shift-key'
 import { commonMessages } from '#ui/utils/common-messages'
 import { truncatedTooltip } from '#ui/utils/truncate'
 
@@ -159,7 +159,7 @@ const clientWarningMessage = computed(() => {
 	}
 })
 
-const { shift: shiftHeld } = useMagicKeys()
+const shiftHeld = useShiftKey()
 const deleteHovered = ref(false)
 const installTooltip = computed(() => {
 	if (!props.installing) return undefined

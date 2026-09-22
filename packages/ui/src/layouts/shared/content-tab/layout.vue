@@ -491,7 +491,18 @@ const filteredItems = computed(() => {
 	const searched = search(sorted)
 	return applyMetadataFilters(applyFilters(searched))
 })
+// Скільки рядків у секції варто віртуалізувати. Малі групи дешевше показати
+// цілком, ніж тримати на кожну свій обробник прокрутки.
+const VIRTUALIZE_SECTION_FROM = 24
+
 const tableItems = computed<ContentCardTableItem[]>(() => {
+	// Меню «⋮» для рядка коштує десятки ICU-рядків (дії вмісту + дерево груп),
+	// тож будуємо його ліниво — лише для рядків, які справді показують, — і
+	// запам'ятовуємо на час життя цього обчислення. Дерево груп читаємо тут,
+	// щоб зміна груп скидала ці збережені меню.
+	void modGroups?.groups.value
+	const overflowByItem = new Map<string, ButtonMenuOption[]>()
+
 	const items = filteredItems.value.map((item) => {
 		const base = ctx.mapToTableItem(item)
 		const id = getItemId(item)
@@ -515,7 +526,14 @@ const tableItems = computed<ContentCardTableItem[]>(() => {
 			clientWarning,
 			hideDelete: base.hideDelete,
 			hideSwitchVersion: base.hideSwitchVersion ?? !base.versionLink,
-			overflowOptions: withGroupOptions(item, ctx.getOverflowOptions?.(item)),
+			get overflowOptions() {
+				let options = overflowByItem.get(id)
+				if (!options) {
+					options = withGroupOptions(item, ctx.getOverflowOptions?.(item)) ?? []
+					overflowByItem.set(id, options)
+				}
+				return options
+			},
 		}
 	})
 
@@ -1853,9 +1871,11 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 										</template>
 									</div>
 									<!-- Батько без власних файлів, але з модами в підгрупах — без
-									     плашки «Порожня група»; дроп у нього працює через секцію -->
+									     плашки «Порожня група»; дроп у нього працює через секцію.
+									     v-if, а не v-show: згорнута група не тримає свої рядки
+									     змонтованими (на великих збірках це сотні компонентів) -->
 									<div
-										v-show="
+										v-if="
 											!isGroupCollapsed(section.key) &&
 											(section.items.length > 0 || section.totalItems === 0)
 										"
@@ -1867,7 +1887,9 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 											:items="section.items"
 											:highlighted-item-id="highlightedItemId"
 											:show-selection="true"
-											:virtualized="false"
+											:virtualized="
+												viewMode === 'list' && section.items.length >= VIRTUALIZE_SECTION_FROM
+											"
 											hide-header
 											flat
 											draggable
