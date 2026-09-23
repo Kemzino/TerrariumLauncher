@@ -1926,9 +1926,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 											:items="section.items"
 											:highlighted-item-id="highlightedItemId"
 											:show-selection="true"
-											:virtualized="
-												viewMode === 'list' && section.items.length >= VIRTUALIZE_SECTION_FROM
-											"
+											:virtualized="section.items.length >= VIRTUALIZE_SECTION_FROM"
 											hide-header
 											flat
 											draggable

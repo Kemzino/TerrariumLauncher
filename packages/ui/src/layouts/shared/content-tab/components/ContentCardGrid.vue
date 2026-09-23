@@ -12,7 +12,7 @@ import {
 	TriangleAlertIcon,
 	UploadIcon,
 } from '@modrinth/assets'
-import { computed, getCurrentInstance, ref } from 'vue'
+import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 
 import AutoLink from '#ui/components/base/AutoLink.vue'
 import Avatar from '#ui/components/base/Avatar.vue'
@@ -20,6 +20,7 @@ import { IconButton, TeleportOverflowMenu } from '#ui/components/base/buttons'
 import Checkbox from '#ui/components/base/Checkbox.vue'
 import Toggle from '#ui/components/base/Toggle.vue'
 import { useVIntl } from '#ui/composables/i18n'
+import { useVirtualScroll } from '#ui/composables/virtual-scroll'
 import { commonMessages } from '#ui/utils/common-messages'
 
 import type { ContentCardTableItem } from '../types'
@@ -33,9 +34,10 @@ interface Props {
 	hideDelete?: boolean
 	/** Плитки можна тягнути (перенесення між групами) */
 	draggable?: boolean
+	/** Показувати лише видимі рядки сітки (за замовчуванням — так) */
+	virtualized?: boolean
 	// Приймаються для сумісності з ContentCardTable (layout перемикає компоненти
 	// через <component :is>), у сітці не мають сенсу
-	virtualized?: boolean
 	hideHeader?: boolean
 	flat?: boolean
 }
@@ -45,10 +47,60 @@ const props = withDefaults(defineProps<Props>(), {
 	showSelection: false,
 	hideDelete: false,
 	draggable: false,
-	virtualized: false,
+	virtualized: true,
 	hideHeader: false,
 	flat: false,
 })
+
+// Плитка має сталу висоту (аватар 2.5rem + поля), тож крок рядка сітки відомий
+// наперед — без цього віртуалізація рахувати позиції не може.
+const TILE_HEIGHT = 58
+const GRID_GAP = 8
+const ROW_HEIGHT = TILE_HEIGHT + GRID_GAP
+/** Мінімальна ширина плитки — та сама, що в grid-template-columns */
+const MIN_TILE_WIDTH = 304
+
+// Скільки плиток у рядку: рахуємо самі, бо auto-fill віртуалізації не видно
+const gridWidth = ref(0)
+const columns = computed(() =>
+	Math.max(1, Math.floor((gridWidth.value + GRID_GAP) / (MIN_TILE_WIDTH + GRID_GAP))),
+)
+
+const rows = computed<ContentCardTableItem[][]>(() => {
+	const perRow = columns.value
+	const out: ContentCardTableItem[][] = []
+	for (let i = 0; i < props.items.length; i += perRow) {
+		out.push(props.items.slice(i, i + perRow))
+	}
+	return out
+})
+
+const { listContainer, totalHeight, visibleRange, visibleTop, visibleItems, syncScrollState } =
+	useVirtualScroll(rows, {
+		itemHeight: ROW_HEIGHT,
+		bufferSize: 2,
+		initialItemCount: 8,
+		enabled: toRef(props, 'virtualized'),
+	})
+
+let widthObserver: ResizeObserver | undefined
+onMounted(() => {
+	const el = listContainer.value
+	if (!el || typeof ResizeObserver === 'undefined') {
+		gridWidth.value = el?.clientWidth ?? 0
+		return
+	}
+	gridWidth.value = el.clientWidth
+	widthObserver = new ResizeObserver(() => {
+		gridWidth.value = el.clientWidth
+	})
+	widthObserver.observe(el)
+})
+onBeforeUnmount(() => widthObserver?.disconnect())
+
+// Інша кількість колонок — інші рядки й інша загальна висота: позиції треба
+// перечитати, інакше видимий діапазон лишиться від старої розкладки
+watch(columns, () => syncScrollState())
 
 const selectedIds = defineModel<string[]>('selectedIds', { default: () => [] })
 
@@ -114,169 +166,196 @@ function isExternalLink(link: unknown) {
 </script>
 
 <template>
-	<div v-if="items.length > 0" class="content-grid" role="list">
-		<div
-			v-for="(item, index) in items"
-			:key="item.id"
-			role="listitem"
-			:data-content-card-item="item.id"
-			:data-drag-id="draggable && !item.disabled ? item.id : undefined"
-			class="content-grid__tile flex min-w-0 items-center gap-2 rounded-xl border border-solid p-2 transition-colors"
-			:class="[
-				isItemSelected(item.id)
-					? 'border-brand bg-brand-highlight'
-					: 'border-surface-4 bg-surface-2',
-				item.id === highlightedItemId ? 'outline outline-2 -outline-offset-2 outline-brand' : '',
-				item.disabled && !item.installing ? 'opacity-50 grayscale' : '',
-				item.installing ? 'opacity-50' : '',
-			]"
-		>
-			<Checkbox
-				v-if="showSelection"
-				:model-value="isItemSelected(item.id)"
-				:aria-label="item.project.title"
-				:disabled="isDisabled(item)"
-				class="shrink-0"
-				@update:model-value="(value, event) => toggleItemSelection(item.id, value, index, event)"
-			/>
-
+	<div
+		v-if="items.length > 0"
+		ref="listContainer"
+		role="list"
+		class="relative w-full"
+		:style="{ minHeight: `${totalHeight}px`, overflowAnchor: 'none' }"
+	>
+		<div class="absolute w-full" :style="{ top: `${visibleTop}px` }">
 			<div
-				class="flex min-w-0 flex-1 items-center gap-2 transition-[filter,opacity] duration-200"
-				:class="item.enabled === false && !item.disabled ? 'grayscale opacity-50' : ''"
+				v-for="(row, rowIndex) in visibleItems"
+				:key="visibleRange.start + rowIndex"
+				class="content-grid__row"
+				:style="{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }"
 			>
-				<div class="relative flex shrink-0 items-center">
-					<Avatar
-						:src="item.project.icon_url"
-						:alt="item.project.title"
-						size="2.5rem"
-						no-shadow
-						class="rounded-xl border border-surface-5"
+				<div
+					v-for="(item, columnIndex) in row"
+					:key="item.id"
+					role="listitem"
+					:data-content-card-item="item.id"
+					:data-drag-id="draggable && !item.disabled ? item.id : undefined"
+					class="content-grid__tile flex min-w-0 items-center gap-2 rounded-xl border border-solid p-2 transition-colors"
+					:class="[
+						isItemSelected(item.id)
+							? 'border-brand bg-brand-highlight'
+							: 'border-surface-4 bg-surface-2',
+						item.id === highlightedItemId
+							? 'outline outline-2 -outline-offset-2 outline-brand'
+							: '',
+						item.disabled && !item.installing ? 'opacity-50 grayscale' : '',
+						item.installing ? 'opacity-50' : '',
+					]"
+				>
+					<Checkbox
+						v-if="showSelection"
+						:model-value="isItemSelected(item.id)"
+						:aria-label="item.project.title"
+						:disabled="isDisabled(item)"
+						class="shrink-0"
+						@update:model-value="
+							(value, event) =>
+								toggleItemSelection(
+									item.id,
+									value,
+									(visibleRange.start + rowIndex) * columns + columnIndex,
+									event,
+								)
+						"
 					/>
-					<div
-						v-if="item.installing"
-						class="absolute inset-0 flex items-center justify-center rounded-xl bg-black/20"
-					>
-						<SpinnerIcon class="size-4 animate-spin text-white" />
-					</div>
-				</div>
 
-				<div class="flex min-w-0 flex-1 flex-col" data-no-drag>
-					<div class="flex min-w-0 items-center gap-1">
-						<AutoLink
-							v-tooltip="item.project.title"
-							:target="isExternalLink(item.projectLink)"
-							:to="item.projectLink"
-							class="truncate text-sm font-semibold leading-5 text-contrast !decoration-contrast"
-							:class="{ 'hover:underline': item.projectLink }"
-						>
-							{{ item.project.title }}
-						</AutoLink>
-						<span
-							v-if="item.isClientOnly"
-							v-tooltip="formatMessage(clientWarningMessage(item))"
-							class="inline-flex size-4 shrink-0 cursor-help items-center justify-center"
-							tabindex="0"
-						>
-							<TriangleAlertIcon class="pointer-events-none size-3.5 text-orange" />
-						</span>
-					</div>
 					<div
-						v-tooltip="item.version?.file_name"
-						class="flex min-w-0 items-center gap-1 text-xs leading-4 text-secondary"
+						class="flex min-w-0 flex-1 items-center gap-2 transition-[filter,opacity] duration-200"
+						:class="item.enabled === false && !item.disabled ? 'grayscale opacity-50' : ''"
 					>
-						<template v-if="item.version && !item.external">
-							<AutoLink
-								:target="isExternalLink(item.versionLink)"
-								:to="item.versionLink"
-								class="truncate !decoration-secondary"
-								:class="{ 'hover:underline': item.versionLink }"
+						<div class="relative flex shrink-0 items-center">
+							<Avatar
+								:src="item.project.icon_url"
+								:alt="item.project.title"
+								size="2.5rem"
+								no-shadow
+								class="rounded-xl border border-surface-5"
+							/>
+							<div
+								v-if="item.installing"
+								class="absolute inset-0 flex items-center justify-center rounded-xl bg-black/20"
 							>
-								{{ item.version.version_number }}
-							</AutoLink>
-						</template>
-						<span v-else-if="item.external" class="flex items-center gap-1">
-							<UploadIcon class="size-3 shrink-0" />
-							<span class="truncate">{{ item.version?.file_name }}</span>
-						</span>
-						<span v-else-if="item.source" class="truncate">{{ item.source.project.title }}</span>
-						<span v-else-if="item.owner" class="truncate">{{ item.owner.name }}</span>
+								<SpinnerIcon class="size-4 animate-spin text-white" />
+							</div>
+						</div>
+
+						<div class="flex min-w-0 flex-1 flex-col" data-no-drag>
+							<div class="flex min-w-0 items-center gap-1">
+								<AutoLink
+									v-tooltip="item.project.title"
+									:target="isExternalLink(item.projectLink)"
+									:to="item.projectLink"
+									class="truncate text-sm font-semibold leading-5 text-contrast !decoration-contrast"
+									:class="{ 'hover:underline': item.projectLink }"
+								>
+									{{ item.project.title }}
+								</AutoLink>
+								<span
+									v-if="item.isClientOnly"
+									v-tooltip="formatMessage(clientWarningMessage(item))"
+									class="inline-flex size-4 shrink-0 cursor-help items-center justify-center"
+									tabindex="0"
+								>
+									<TriangleAlertIcon class="pointer-events-none size-3.5 text-orange" />
+								</span>
+							</div>
+							<div
+								v-tooltip="item.version?.file_name"
+								class="flex min-w-0 items-center gap-1 text-xs leading-4 text-secondary"
+							>
+								<template v-if="item.version && !item.external">
+									<AutoLink
+										:target="isExternalLink(item.versionLink)"
+										:to="item.versionLink"
+										class="truncate !decoration-secondary"
+										:class="{ 'hover:underline': item.versionLink }"
+									>
+										{{ item.version.version_number }}
+									</AutoLink>
+								</template>
+								<span v-else-if="item.external" class="flex items-center gap-1">
+									<UploadIcon class="size-3 shrink-0" />
+									<span class="truncate">{{ item.version?.file_name }}</span>
+								</span>
+								<span v-else-if="item.source" class="truncate">{{
+									item.source.project.title
+								}}</span>
+								<span v-else-if="item.owner" class="truncate">{{ item.owner.name }}</span>
+							</div>
+						</div>
+					</div>
+
+					<div class="flex shrink-0 items-center gap-0.5">
+						<IconButton
+							v-if="item.locked"
+							v-tooltip="formatMessage(commonMessages.updateButton)"
+							type="quiet"
+							size="sm"
+							:label="formatMessage(commonMessages.updateButton)"
+							disabled
+						>
+							<LockIcon class="size-4" />
+						</IconButton>
+						<IconButton
+							v-else-if="hasUpdateListener && item.hasUpdate"
+							v-tooltip="actionTooltip(item, formatMessage(commonMessages.updateAvailableLabel))"
+							type="quiet"
+							size="sm"
+							color="green"
+							:label="actionTooltip(item, formatMessage(commonMessages.updateAvailableLabel))"
+							:disabled="isDisabled(item)"
+							class="hover:!bg-green focus-visible:!bg-green hover:!text-[var(--color-accent-contrast)] focus-visible:!text-[var(--color-accent-contrast)]"
+							@click="emit('update', item.id)"
+						>
+							<DownloadIcon class="size-4" />
+						</IconButton>
+						<IconButton
+							v-else-if="hasSwitchVersionListener && item.version && !item.hideSwitchVersion"
+							v-tooltip="actionTooltip(item, formatMessage(commonMessages.switchVersionButton))"
+							type="quiet"
+							size="sm"
+							:label="actionTooltip(item, formatMessage(commonMessages.switchVersionButton))"
+							:disabled="isDisabled(item)"
+							@click="emit('switchVersion', item.id)"
+						>
+							<ArrowLeftRightIcon class="size-4" />
+						</IconButton>
+
+						<Toggle
+							v-if="item.enabled !== undefined && !item.hideToggle"
+							v-tooltip="
+								(isDisabled(item) || item.toggleDisabled) &&
+								(item.toggleDisabledTooltip || item.disabledTooltip)
+									? (item.toggleDisabledTooltip ?? item.disabledTooltip)
+									: undefined
+							"
+							:model-value="item.enabled"
+							:disabled="isDisabled(item) || item.toggleDisabled"
+							:aria-label="item.project.title"
+							class="mx-1 my-auto"
+							@update:model-value="(val) => emit('update:enabled', item.id, val as boolean)"
+						/>
+
+						<IconButton
+							v-if="hasDeleteListener && !hideDelete && !item.hideDelete"
+							v-tooltip="actionTooltip(item, formatMessage(commonMessages.deleteLabel))"
+							type="quiet"
+							size="sm"
+							:label="actionTooltip(item, formatMessage(commonMessages.deleteLabel))"
+							:disabled="isDisabled(item)"
+							@click="emit('delete', item.id, $event)"
+						>
+							<TrashIcon class="size-4 text-secondary" />
+						</IconButton>
+
+						<TeleportOverflowMenu
+							v-if="item.overflowOptions?.length"
+							type="quiet"
+							size="sm"
+							label="More options"
+							:options="item.overflowOptions"
+							:disabled="isDisabled(item)"
+						>
+							<MoreVerticalIcon class="size-4" />
+						</TeleportOverflowMenu>
 					</div>
 				</div>
-			</div>
-
-			<div class="flex shrink-0 items-center gap-0.5">
-				<IconButton
-					v-if="item.locked"
-					v-tooltip="formatMessage(commonMessages.updateButton)"
-					type="quiet"
-					size="sm"
-					:label="formatMessage(commonMessages.updateButton)"
-					disabled
-				>
-					<LockIcon class="size-4" />
-				</IconButton>
-				<IconButton
-					v-else-if="hasUpdateListener && item.hasUpdate"
-					v-tooltip="actionTooltip(item, formatMessage(commonMessages.updateAvailableLabel))"
-					type="quiet"
-					size="sm"
-					color="green"
-					:label="actionTooltip(item, formatMessage(commonMessages.updateAvailableLabel))"
-					:disabled="isDisabled(item)"
-					class="hover:!bg-green focus-visible:!bg-green hover:!text-[var(--color-accent-contrast)] focus-visible:!text-[var(--color-accent-contrast)]"
-					@click="emit('update', item.id)"
-				>
-					<DownloadIcon class="size-4" />
-				</IconButton>
-				<IconButton
-					v-else-if="hasSwitchVersionListener && item.version && !item.hideSwitchVersion"
-					v-tooltip="actionTooltip(item, formatMessage(commonMessages.switchVersionButton))"
-					type="quiet"
-					size="sm"
-					:label="actionTooltip(item, formatMessage(commonMessages.switchVersionButton))"
-					:disabled="isDisabled(item)"
-					@click="emit('switchVersion', item.id)"
-				>
-					<ArrowLeftRightIcon class="size-4" />
-				</IconButton>
-
-				<Toggle
-					v-if="item.enabled !== undefined && !item.hideToggle"
-					v-tooltip="
-						(isDisabled(item) || item.toggleDisabled) &&
-						(item.toggleDisabledTooltip || item.disabledTooltip)
-							? (item.toggleDisabledTooltip ?? item.disabledTooltip)
-							: undefined
-					"
-					:model-value="item.enabled"
-					:disabled="isDisabled(item) || item.toggleDisabled"
-					:aria-label="item.project.title"
-					class="mx-1 my-auto"
-					@update:model-value="(val) => emit('update:enabled', item.id, val as boolean)"
-				/>
-
-				<IconButton
-					v-if="hasDeleteListener && !hideDelete && !item.hideDelete"
-					v-tooltip="actionTooltip(item, formatMessage(commonMessages.deleteLabel))"
-					type="quiet"
-					size="sm"
-					:label="actionTooltip(item, formatMessage(commonMessages.deleteLabel))"
-					:disabled="isDisabled(item)"
-					@click="emit('delete', item.id, $event)"
-				>
-					<TrashIcon class="size-4 text-secondary" />
-				</IconButton>
-
-				<TeleportOverflowMenu
-					v-if="item.overflowOptions?.length"
-					type="quiet"
-					size="sm"
-					label="More options"
-					:options="item.overflowOptions"
-					:disabled="isDisabled(item)"
-				>
-					<MoreVerticalIcon class="size-4" />
-				</TeleportOverflowMenu>
 			</div>
 		</div>
 	</div>
@@ -289,9 +368,16 @@ function isExternalLink(link: unknown) {
 </template>
 
 <style scoped>
-.content-grid {
+/* Крок рядка має точно збігатися з ROW_HEIGHT у скрипті, інакше віртуалізація
+   рахуватиме позиції неправильно */
+.content-grid__row {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
 	gap: 0.5rem;
+	height: 58px;
+	margin-bottom: 8px;
+}
+
+.content-grid__tile {
+	height: 100%;
 }
 </style>
