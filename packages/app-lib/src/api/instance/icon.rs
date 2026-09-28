@@ -10,7 +10,7 @@ use bytes::Bytes;
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageFormat, ImageReader, Rgba, RgbaImage};
 use std::fs::File as StdFile;
-use std::io::{BufRead, BufReader, Cursor, Seek};
+use std::io::{BufRead, BufReader, Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
 
 const INSTANCE_ICON_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -18,6 +18,10 @@ const INSTANCE_ICON_MAX_DIMENSION: u32 = 512;
 const INSTANCE_ICON_MAX_SOURCE_DIMENSION: u32 = 8_192;
 const INSTANCE_ICON_MAX_DECODE_BYTES: u64 = 64 * 1024 * 1024;
 const GENERATED_ICON_SIZE: u32 = 256;
+const PNG_EXTENSION: &str = "png";
+const GIF_EXTENSION: &str = "gif";
+/// Скільки байтів початку файлу треба, щоб упізнати формат і полотно GIF
+const HEAD_BYTES: usize = 64;
 const MAX_ICON_CONFIG_ID_LENGTH: usize = 64;
 const MAX_SYMBOL_BYTES: usize = 4 * 1024 * 1024;
 const MAX_SYMBOL_DIMENSION: u32 = 4096;
@@ -159,7 +163,8 @@ async fn cache_generated_icon_with_state(
         render_generated_icon(background, &symbol_bytes)
     })
     .await??;
-    let file = write_cached_icon(Bytes::from(icon_bytes), state).await?;
+    let file = write_cached_icon(Bytes::from(icon_bytes), PNG_EXTENSION, state)
+        .await?;
 
     Ok(file.to_string_lossy().to_string())
 }
@@ -168,16 +173,21 @@ pub(crate) async fn cache_icon(
     bytes: Bytes,
     state: &State,
 ) -> crate::Result<PathBuf> {
-    let bytes = tokio::task::spawn_blocking(move || {
+    let (bytes, extension) = tokio::task::spawn_blocking(move || {
         if looks_like_svg(&bytes) {
             return Err(svg_not_supported_error());
         }
 
-        normalize_raster(Cursor::new(bytes))
+        if looks_like_gif(&bytes) {
+            check_gif_dimensions(&bytes)?;
+            return Ok((bytes, GIF_EXTENSION));
+        }
+
+        normalize_raster(Cursor::new(bytes)).map(|bytes| (bytes, PNG_EXTENSION))
     })
     .await??;
 
-    write_cached_icon(bytes, state).await
+    write_cached_icon(bytes, extension, state).await
 }
 
 pub(crate) async fn cache_icon_from_path(
@@ -185,7 +195,7 @@ pub(crate) async fn cache_icon_from_path(
     state: &State,
 ) -> crate::Result<PathBuf> {
     let icon_path = icon_path.to_path_buf();
-    let bytes = tokio::task::spawn_blocking(move || {
+    let (bytes, extension) = tokio::task::spawn_blocking(move || {
         let file = StdFile::open(&icon_path).map_err(|error| {
             crate::ErrorKind::InputError(format!(
                 "Could not open instance icon {}: {error}",
@@ -193,24 +203,44 @@ pub(crate) async fn cache_icon_from_path(
             ))
         })?;
         let mut reader = BufReader::new(file);
-        let looks_like_svg = {
+        let head = {
             let bytes = reader.fill_buf().map_err(|error| {
                 crate::ErrorKind::InputError(format!(
                     "Could not inspect instance icon {}: {error}",
                     icon_path.display()
                 ))
             })?;
-            looks_like_svg(bytes)
+            bytes[..bytes.len().min(HEAD_BYTES)].to_vec()
         };
-        if has_svg_extension(&icon_path) || looks_like_svg {
+        if has_svg_extension(&icon_path) || looks_like_svg(&head) {
             return Err(svg_not_supported_error());
         }
 
-        normalize_raster(reader)
+        // Анімована гіфка зберігається лише в первісних байтах: декодування
+        // в RGBA й перезапис у PNG лишили б від неї один кадр
+        if looks_like_gif(&head) {
+            check_gif_dimensions(&head)?;
+            reader.rewind().map_err(|error| {
+                crate::ErrorKind::InputError(format!(
+                    "Could not read instance icon {}: {error}",
+                    icon_path.display()
+                ))
+            })?;
+            let mut raw = Vec::new();
+            reader.read_to_end(&mut raw).map_err(|error| {
+                crate::ErrorKind::InputError(format!(
+                    "Could not read instance icon {}: {error}",
+                    icon_path.display()
+                ))
+            })?;
+            return Ok((Bytes::from(raw), GIF_EXTENSION));
+        }
+
+        normalize_raster(reader).map(|bytes| (bytes, PNG_EXTENSION))
     })
     .await??;
 
-    write_cached_icon(bytes, state).await
+    write_cached_icon(bytes, extension, state).await
 }
 
 pub(crate) async fn migrate_legacy_icons() -> crate::Result<()> {
@@ -310,6 +340,7 @@ async fn apply_instance_icon(
 
 async fn write_cached_icon(
     bytes: Bytes,
+    extension: &str,
     state: &State,
 ) -> crate::Result<PathBuf> {
     if bytes.len() >= INSTANCE_ICON_MAX_BYTES {
@@ -321,7 +352,7 @@ async fn write_cached_icon(
         .directories
         .caches_dir()
         .join("icons")
-        .join(format!("{hash}.png"));
+        .join(format!("{hash}.{extension}"));
     write(&path, &bytes, &state.io_semaphore).await?;
 
     Ok(io::canonicalize(path)?)
@@ -398,7 +429,10 @@ fn inspect_legacy_icon(icon_path: &Path) -> crate::Result<LegacyIconAction> {
     }
 
     if metadata.len() < INSTANCE_ICON_MAX_BYTES as u64
-        && image::guess_format(bytes).ok() == Some(image::ImageFormat::Png)
+        && matches!(
+            image::guess_format(bytes).ok(),
+            Some(image::ImageFormat::Png | image::ImageFormat::Gif)
+        )
     {
         return Ok(LegacyIconAction::Keep);
     }
@@ -558,6 +592,36 @@ fn image_input_error(error: image::ImageError) -> crate::Error {
         "Invalid instance icon symbol: {error}"
     ))
     .into()
+}
+
+/// Гіфку впізнаємо за сигнатурою, а не за розширенням: збірки ставлять іконки
+/// звідки завгодно, а анімацію треба зберегти саме за вмістом.
+fn looks_like_gif(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a")
+}
+
+/// Розмір полотна з заголовка GIF — щоб не декодувати всі кадри лише заради
+/// перевірки, що іконка не надмірна.
+fn check_gif_dimensions(bytes: &[u8]) -> crate::Result<()> {
+    let header = bytes.get(..10).ok_or_else(|| {
+        crate::ErrorKind::InputError(
+            "Could not read instance icon: truncated GIF".to_string(),
+        )
+    })?;
+    let width = u32::from(u16::from_le_bytes([header[6], header[7]]));
+    let height = u32::from(u16::from_le_bytes([header[8], header[9]]));
+    if width == 0
+        || height == 0
+        || width > INSTANCE_ICON_MAX_SOURCE_DIMENSION
+        || height > INSTANCE_ICON_MAX_SOURCE_DIMENSION
+    {
+        return Err(crate::ErrorKind::InputError(format!(
+            "Instance icon is {width}x{height}; GIF icons may be at most              {INSTANCE_ICON_MAX_SOURCE_DIMENSION}x{INSTANCE_ICON_MAX_SOURCE_DIMENSION}"
+        ))
+        .into());
+    }
+
+    Ok(())
 }
 
 fn looks_like_svg(bytes: &[u8]) -> bool {

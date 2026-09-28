@@ -22,7 +22,7 @@ import { ModrinthIcon } from '@modrinth/assets'
 import { injectLoadingState } from '@modrinth/ui'
 import { onMounted, ref, watch } from 'vue'
 
-import terrariumLogo from '@/assets/terrarium/logo.png'
+import terrariumLogo from '@/assets/terrarium/logo.gif'
 import ProgressBar from '@/components/ui/ProgressBar.vue'
 import { useAppEvent } from '@/composables/use-app-event'
 import { useTheme } from '@/composables/use-theme.ts'

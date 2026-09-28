@@ -24,7 +24,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-import terrariumLogo from '@/assets/terrarium/logo.png'
+import terrariumLogo from '@/assets/terrarium/logo.gif'
 import AccountsCard from '@/components/ui/AccountsCard.vue'
 import TerrariumBackdrop from '@/components/ui/TerrariumBackdrop.vue'
 import TerrariumChangelogModal from '@/components/ui/TerrariumChangelogModal.vue'

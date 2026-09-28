@@ -720,41 +720,50 @@ const groupedSections = computed<GroupedSection[]>(() =>
 
 // Віртуалізація рятує лише велику секцію; коли груп десяток по 10-20 модів,
 // одночасно створюється все одно пів тисячі компонентів і вкладка
-// відкривається ривком. Тому спершу монтуємо кілька перших секцій, а решту —
-// у простої браузера, згори вниз: список доростає нижче видимої частини, тож
-// нічого не стрибає.
+// відкривається ривком. Тому рядки секції створюються не одразу, а коли до неї
+// докручують: заголовки всіх груп є завжди (вони дешеві), а вміст доростає
+// згори вниз. Секція, яку вже показали, лишається змонтованою — інакше
+// прокрутка назад смикалася б.
 const SECTIONS_AT_ONCE = 3
+/** На скільки секцій наперед готуємо вміст, коли до групи докрутили */
+const SECTIONS_AHEAD = 2
+/** Запас у пікселях: секція монтується ще до появи в полі зору */
+const SECTION_PREFETCH_PX = 600
 const mountedSectionCount = ref(SECTIONS_AT_ONCE)
-// Черга монтування перезапускається на кожен новий набір секцій; стара має
-// зупинитись, інакше лічильник ростиме з кількох ланцюжків одразу
-let mountGeneration = 0
+let sectionObserver: IntersectionObserver | null = null
 
-function scheduleNextSections(generation = mountGeneration) {
-	if (typeof window === 'undefined') return
-	if (generation !== mountGeneration) return
-	if (mountedSectionCount.value >= groupedSections.value.length) return
-	const run = () => {
-		if (generation !== mountGeneration) return
-		mountedSectionCount.value += 1
-		scheduleNextSections(generation)
-	}
-	if (typeof window.requestIdleCallback === 'function') {
-		window.requestIdleCallback(run, { timeout: 250 })
-	} else {
-		window.setTimeout(run, 16)
-	}
+function noteSectionVisible(index: number) {
+	const wanted = index + SECTIONS_AHEAD
+	if (wanted > mountedSectionCount.value) mountedSectionCount.value = wanted
 }
 
-// Новий набір секцій (інший примірник, пошук, фільтр) — знову згори вниз
-watch(
-	() => groupedSections.value.length,
-	() => {
-		mountGeneration += 1
-		mountedSectionCount.value = SECTIONS_AT_ONCE
-		scheduleNextSections()
-	},
-	{ immediate: true },
-)
+function observeSection(element: Element | null, index: number) {
+	if (!(element instanceof HTMLElement)) return
+	element.dataset.sectionIndex = String(index)
+	if (typeof IntersectionObserver === 'undefined') {
+		// Немає спостерігача — краще показати все, ніж лишити порожні заголовки
+		noteSectionVisible(groupedSections.value.length)
+		return
+	}
+	if (!sectionObserver) {
+		sectionObserver = new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) {
+					if (!entry.isIntersecting) continue
+					const index = Number((entry.target as HTMLElement).dataset.sectionIndex)
+					if (Number.isFinite(index)) noteSectionVisible(index)
+				}
+			},
+			{ rootMargin: `${SECTION_PREFETCH_PX}px 0px` },
+		)
+	}
+	sectionObserver.observe(element)
+}
+
+onBeforeUnmount(() => {
+	sectionObserver?.disconnect()
+	sectionObserver = null
+})
 
 function isGroupCollapsed(key: string) {
 	return !!collapsedGroups.value[key]
@@ -1833,6 +1842,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 								<section
 									v-for="(section, sectionIndex) in groupedSections"
 									:key="section.key"
+									:ref="(el) => observeSection(el as Element | null, sectionIndex)"
 									class="mod-group rounded-2xl border border-solid bg-surface-1 transition-colors"
 									:class="[
 										dropTargetKey === section.key

@@ -17,7 +17,7 @@ import { defineMessages, IconButton, useVIntl } from '@modrinth/ui'
 import { nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import terrariumLogo from '@/assets/terrarium/logo.png'
+import terrariumLogo from '@/assets/terrarium/logo.gif'
 import { openTerrariumLink } from '@/helpers/terrarium-links'
 
 const props = defineProps<{ open: boolean }>()
