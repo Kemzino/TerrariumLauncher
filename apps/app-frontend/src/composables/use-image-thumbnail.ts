@@ -3,6 +3,9 @@ import { type MaybeRefOrGetter, ref, toValue, watch } from 'vue'
 
 let queue: Promise<void> = Promise.resolve()
 
+/** Формати, які втрачають анімацію після перемальовування в мініатюру */
+const ANIMATED_IMAGE = /\.gif$/i
+
 export function useImageThumbnail(
 	path: MaybeRefOrGetter<string | null | undefined>,
 	size: MaybeRefOrGetter<number>,
@@ -14,6 +17,12 @@ export function useImageThumbnail(
 		([source, pixels], [previousSource, previousPixels], onCleanup) => {
 			if (source !== previousSource || pixels !== previousPixels) thumbnail.value = undefined
 			if (!source) return
+			// Мініатюра — це один кадр, перемальований наново, тож анімована
+			// іконка від неї завмирає. Гіфку показуємо як є.
+			if (ANIMATED_IMAGE.test(source)) {
+				thumbnail.value = convertFileSrc(source)
+				return
+			}
 			let active = true
 			onCleanup(() => {
 				active = false

@@ -1064,9 +1064,13 @@ onMounted(async () => {
 
 .terrarium-hero__logo {
 	display: block;
-	width: clamp(16rem, 28vw, 24rem);
+	// Рідний кадр — 600px завширшки. Менший розмір ламав би піксельну сітку
+	// (звідси й «мило»), тож зменшуємо лише коли вікно справді вузьке
+	width: min(100%, 37.5rem);
 	height: auto;
-	filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.45));
+	// Тінь лише під кубом, щоб логотип не висів у повітрі; на прозорих
+	// ділянках кадру вона нічого не малює
+	filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.55));
 	user-select: none;
 	-webkit-user-drag: none;
 }

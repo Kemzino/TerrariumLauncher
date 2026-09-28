@@ -17,7 +17,7 @@ import { defineMessages, IconButton, useVIntl } from '@modrinth/ui'
 import { nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import terrariumLogo from '@/assets/terrarium/logo.gif'
+import terrariumMark from '@/assets/terrarium/logo-mark.gif'
 import { openTerrariumLink } from '@/helpers/terrarium-links'
 
 const props = defineProps<{ open: boolean }>()
@@ -84,7 +84,10 @@ watch(
 				<div class="terrarium-nav__backdrop" @click="emit('close')"></div>
 				<nav class="terrarium-nav__panel" :aria-label="formatMessage(messages.menu)">
 					<div class="terrarium-nav__head">
-						<img :src="terrariumLogo" alt="" class="terrarium-nav__logo" />
+						<span class="terrarium-nav__badge">
+							<img :src="terrariumMark" alt="" class="terrarium-nav__logo" />
+							<span class="terrarium-nav__wordmark">Terrarium</span>
+						</span>
 						<IconButton type="quiet" :label="formatMessage(messages.close)" @click="emit('close')">
 							<XIcon />
 						</IconButton>
@@ -206,10 +209,28 @@ watch(
 	padding: 0.25rem 0.25rem 0.75rem;
 }
 
+.terrarium-nav__badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.55rem;
+	padding: 0.35rem 0.7rem 0.35rem 0.4rem;
+	border: 1px solid color-mix(in srgb, var(--color-contrast) 12%, transparent);
+	border-radius: var(--radius-lg);
+	background: color-mix(in srgb, var(--color-contrast) 6%, transparent);
+}
+
 .terrarium-nav__logo {
-	height: 2.75rem;
-	width: auto;
+	display: block;
+	height: 2.25rem;
+	width: 2.25rem;
 	-webkit-user-drag: none;
+}
+
+.terrarium-nav__wordmark {
+	font-size: 1.05rem;
+	font-weight: 800;
+	letter-spacing: -0.02em;
+	color: var(--color-contrast);
 }
 
 .terrarium-nav__section {

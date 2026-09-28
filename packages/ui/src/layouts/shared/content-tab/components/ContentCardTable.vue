@@ -84,7 +84,7 @@ const hasAnyActions = computed(() => {
 	// Check if any items have overflow options or updates
 	const hasItemActions = props.items.some(
 		(item) =>
-			(item.overflowOptions && item.overflowOptions.length > 0) ||
+			(item.hasOverflowOptions ?? (item.overflowOptions?.length ?? 0) > 0) ||
 			item.hasUpdate ||
 			item.enabled !== undefined,
 	)
@@ -306,6 +306,7 @@ function handleSort(column: ContentCardTableSortColumn) {
 					:sync-update-pending="item.syncUpdatePending"
 					:hide-switch-version="item.hideSwitchVersion"
 					:overflow-options="item.overflowOptions"
+					:has-overflow-options="item.hasOverflowOptions"
 					:disabled="item.disabled"
 					:disabled-tooltip="item.disabledTooltip"
 					:toggle-disabled="item.toggleDisabled"
@@ -381,6 +382,7 @@ function handleSort(column: ContentCardTableSortColumn) {
 				:sync-update-pending="item.syncUpdatePending"
 				:hide-switch-version="item.hideSwitchVersion"
 				:overflow-options="item.overflowOptions"
+				:has-overflow-options="item.hasOverflowOptions"
 				:disabled="item.disabled"
 				:disabled-tooltip="item.disabledTooltip"
 				:toggle-disabled="item.toggleDisabled"

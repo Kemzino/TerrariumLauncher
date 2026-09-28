@@ -12,11 +12,20 @@ import {
 	TriangleAlertIcon,
 	UploadIcon,
 } from '@modrinth/assets'
-import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
+import {
+	computed,
+	getCurrentInstance,
+	nextTick,
+	onBeforeUnmount,
+	onMounted,
+	ref,
+	toRef,
+	watch,
+} from 'vue'
 
 import AutoLink from '#ui/components/base/AutoLink.vue'
 import Avatar from '#ui/components/base/Avatar.vue'
-import { IconButton, TeleportOverflowMenu } from '#ui/components/base/buttons'
+import { buttonClasses, TeleportOverflowMenu } from '#ui/components/base/buttons'
 import Checkbox from '#ui/components/base/Checkbox.vue'
 import Toggle from '#ui/components/base/Toggle.vue'
 import { useVIntl } from '#ui/composables/i18n'
@@ -160,6 +169,31 @@ function actionTooltip(item: ContentCardTableItem, fallback: string) {
 	return isDisabled(item) && item.disabledTooltip ? item.disabledTooltip : fallback
 }
 
+// Кнопки плитки малюємо звичайним <button> із класами ButtonFrame: кожен
+// IconButton — це ще два компоненти Vue на плитку, а їх у видимій частині
+// сітки під сотню. Вигляд той самий, бо класи ті самі.
+const TILE_BUTTON = buttonClasses({ type: 'quiet', size: 'sm', iconOnly: true, circular: true })
+
+// Меню «⋮» створюємо лише за кліком. Інакше кожна плитка тягне за собою
+// телепорт, панель і перехід — на прокрутці це сотні зайвих компонентів
+// щосекунди (видно в замірах: TeleportOverflowMenu/ButtonMenuPanel сотнями)
+const openedMenus = ref(new Set<string>())
+const menuRefs = new Map<string, { open: () => void }>()
+
+function registerMenu(id: string, instance: unknown) {
+	if (instance && typeof (instance as { open?: unknown }).open === 'function') {
+		menuRefs.set(id, instance as { open: () => void })
+	} else {
+		menuRefs.delete(id)
+	}
+}
+
+async function openTileMenu(id: string) {
+	openedMenus.value = new Set(openedMenus.value).add(id)
+	await nextTick()
+	menuRefs.get(id)?.open()
+}
+
 function isExternalLink(link: unknown) {
 	return typeof link === 'string' && link.startsWith('http') ? '_blank' : undefined
 }
@@ -174,15 +208,18 @@ function isExternalLink(link: unknown) {
 		:style="{ minHeight: `${totalHeight}px`, overflowAnchor: 'none' }"
 	>
 		<div class="absolute w-full" :style="{ top: `${visibleTop}px` }">
+			<!-- Ключ рядка — місце у вікні, а не номер рядка у списку: коли вікно
+			     їде, Vue оновлює наявні плитки замість того, щоб створювати їх
+			     наново. Створення плитки коштує на порядок дорожче за оновлення -->
 			<div
 				v-for="(row, rowIndex) in visibleItems"
-				:key="visibleRange.start + rowIndex"
+				:key="rowIndex"
 				class="content-grid__row"
 				:style="{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }"
 			>
 				<div
 					v-for="(item, columnIndex) in row"
-					:key="item.id"
+					:key="columnIndex"
 					role="listitem"
 					:data-content-card-item="item.id"
 					:data-drag-id="draggable && !item.disabled ? item.id : undefined"
@@ -282,40 +319,41 @@ function isExternalLink(link: unknown) {
 					</div>
 
 					<div class="flex shrink-0 items-center gap-0.5">
-						<IconButton
+						<button
 							v-if="item.locked"
 							v-tooltip="formatMessage(commonMessages.updateButton)"
-							type="quiet"
-							size="sm"
-							:label="formatMessage(commonMessages.updateButton)"
+							type="button"
+							:aria-label="formatMessage(commonMessages.updateButton)"
 							disabled
+							:class="TILE_BUTTON"
 						>
 							<LockIcon class="size-4" />
-						</IconButton>
-						<IconButton
+						</button>
+						<button
 							v-else-if="hasUpdateListener && item.hasUpdate"
 							v-tooltip="actionTooltip(item, formatMessage(commonMessages.updateAvailableLabel))"
-							type="quiet"
-							size="sm"
-							color="green"
-							:label="actionTooltip(item, formatMessage(commonMessages.updateAvailableLabel))"
+							type="button"
+							:aria-label="actionTooltip(item, formatMessage(commonMessages.updateAvailableLabel))"
 							:disabled="isDisabled(item)"
-							class="hover:!bg-green focus-visible:!bg-green hover:!text-[var(--color-accent-contrast)] focus-visible:!text-[var(--color-accent-contrast)]"
+							:class="[
+								'text-green hover:!bg-green focus-visible:!bg-green hover:!text-[var(--color-accent-contrast)] focus-visible:!text-[var(--color-accent-contrast)]',
+								TILE_BUTTON,
+							]"
 							@click="emit('update', item.id)"
 						>
 							<DownloadIcon class="size-4" />
-						</IconButton>
-						<IconButton
+						</button>
+						<button
 							v-else-if="hasSwitchVersionListener && item.version && !item.hideSwitchVersion"
 							v-tooltip="actionTooltip(item, formatMessage(commonMessages.switchVersionButton))"
-							type="quiet"
-							size="sm"
-							:label="actionTooltip(item, formatMessage(commonMessages.switchVersionButton))"
+							type="button"
+							:aria-label="actionTooltip(item, formatMessage(commonMessages.switchVersionButton))"
 							:disabled="isDisabled(item)"
+							:class="TILE_BUTTON"
 							@click="emit('switchVersion', item.id)"
 						>
 							<ArrowLeftRightIcon class="size-4" />
-						</IconButton>
+						</button>
 
 						<Toggle
 							v-if="item.enabled !== undefined && !item.hideToggle"
@@ -332,28 +370,39 @@ function isExternalLink(link: unknown) {
 							@update:model-value="(val) => emit('update:enabled', item.id, val as boolean)"
 						/>
 
-						<IconButton
+						<button
 							v-if="hasDeleteListener && !hideDelete && !item.hideDelete"
 							v-tooltip="actionTooltip(item, formatMessage(commonMessages.deleteLabel))"
-							type="quiet"
-							size="sm"
-							:label="actionTooltip(item, formatMessage(commonMessages.deleteLabel))"
+							type="button"
+							:aria-label="actionTooltip(item, formatMessage(commonMessages.deleteLabel))"
 							:disabled="isDisabled(item)"
+							:class="TILE_BUTTON"
 							@click="emit('delete', item.id, $event)"
 						>
 							<TrashIcon class="size-4 text-secondary" />
-						</IconButton>
+						</button>
 
 						<TeleportOverflowMenu
-							v-if="item.overflowOptions?.length"
+							v-if="openedMenus.has(item.id)"
+							:ref="(el) => registerMenu(item.id, el)"
 							type="quiet"
 							size="sm"
 							label="More options"
-							:options="item.overflowOptions"
+							:options="item.overflowOptions ?? []"
 							:disabled="isDisabled(item)"
 						>
 							<MoreVerticalIcon class="size-4" />
 						</TeleportOverflowMenu>
+						<button
+							v-else-if="item.hasOverflowOptions ?? item.overflowOptions?.length"
+							type="button"
+							aria-label="More options"
+							:disabled="isDisabled(item)"
+							:class="TILE_BUTTON"
+							@click="openTileMenu(item.id)"
+						>
+							<MoreVerticalIcon class="size-4" />
+						</button>
 					</div>
 				</div>
 			</div>

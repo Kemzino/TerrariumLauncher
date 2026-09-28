@@ -11,7 +11,7 @@ import {
 	TriangleAlertIcon,
 	UploadIcon,
 } from '@modrinth/assets'
-import { computed, getCurrentInstance, ref } from 'vue'
+import { computed, getCurrentInstance, nextTick, ref } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 
 import AutoLink from '#ui/components/base/AutoLink.vue'
@@ -81,6 +81,7 @@ interface Props {
 	syncUpdatePending?: boolean
 	hideSwitchVersion?: boolean
 	overflowOptions?: ButtonMenuOption[]
+	hasOverflowOptions?: boolean
 	disabled?: boolean
 	disabledTooltip?: string | null
 	toggleDisabled?: boolean
@@ -111,6 +112,7 @@ const props = withDefaults(defineProps<Props>(), {
 	syncUpdatePending: false,
 	hideSwitchVersion: false,
 	overflowOptions: undefined,
+	hasOverflowOptions: undefined,
 	disabled: false,
 	disabledTooltip: undefined,
 	toggleDisabled: false,
@@ -141,6 +143,27 @@ const hasSwitchVersionListener = computed(
 
 const versionNumberRef = ref<HTMLElement | null>(null)
 const fileNameRef = ref<HTMLElement | null>(null)
+
+// Підказку з повним текстом рахуємо на наведення, а не в розмітці: перевірка
+// обрізання читає scrollWidth, тобто змушує браузер робити розкладку просто
+// під час рендера. На списку, де рядки з'являються пачками при прокрутці, ці
+// заміри чергуються зі зміною DOM і дають ривки.
+const versionTooltip = ref<string>()
+const fileNameTooltip = ref<string>()
+
+// Меню «⋮» створюємо за першим кліком: інакше кожен рядок тягне за собою
+// телепорт, панель і три композабли, яких ніхто не відкриває
+const overflowReady = ref(false)
+const overflowMenu = ref<{ open: () => void } | null>(null)
+const showOverflow = computed(
+	() => props.hasOverflowOptions ?? (props.overflowOptions?.length ?? 0) > 0,
+)
+
+async function openOverflow() {
+	overflowReady.value = true
+	await nextTick()
+	overflowMenu.value?.open()
+}
 
 const isDisabled = computed(() => props.disabled || props.installing)
 const isToggleDisabled = computed(() => isDisabled.value || props.toggleDisabled)
@@ -344,13 +367,14 @@ const installTooltip = computed(() => {
 		>
 			<template v-if="version">
 				<AutoLink
-					v-tooltip="truncatedTooltip(versionNumberRef, version.version_number)"
+					v-tooltip="versionTooltip"
 					:target="
 						typeof versionLink === 'string' && versionLink.startsWith('http') ? '_blank' : undefined
 					"
 					:to="versionLink"
 					class="inline-flex min-w-0 font-semibold leading-6 text-contrast !decoration-contrast"
 					:class="{ 'hover:underline': versionLink, 'cursor-pointer': versionLink }"
+					@mouseenter="versionTooltip = truncatedTooltip(versionNumberRef, version.version_number)"
 				>
 					<span ref="versionNumberRef" class="truncate">{{
 						version.version_number.slice(0, Math.ceil(version.version_number.length / 2))
@@ -360,8 +384,9 @@ const installTooltip = computed(() => {
 					}}</span>
 				</AutoLink>
 				<span
-					v-tooltip="truncatedTooltip(fileNameRef, version.file_name)"
+					v-tooltip="fileNameTooltip"
 					class="flex min-w-0 leading-6 text-secondary"
+					@mouseenter="fileNameTooltip = truncatedTooltip(fileNameRef, version.file_name)"
 				>
 					<span ref="fileNameRef" class="truncate">{{
 						version.file_name.slice(0, Math.ceil(version.file_name.length / 2))
@@ -502,14 +527,24 @@ const installTooltip = computed(() => {
 			<slot name="additionalButtonsRight" />
 
 			<TeleportOverflowMenu
-				v-if="overflowOptions?.length"
+				v-if="showOverflow && overflowReady"
+				ref="overflowMenu"
 				type="quiet"
 				label="More options"
-				:options="overflowOptions"
+				:options="overflowOptions ?? []"
 				:disabled="isDisabled"
 			>
 				<MoreVerticalIcon class="size-5" />
 			</TeleportOverflowMenu>
+			<IconButton
+				v-else-if="showOverflow"
+				type="quiet"
+				label="More options"
+				:disabled="isDisabled"
+				@click="openOverflow"
+			>
+				<MoreVerticalIcon class="size-5" />
+			</IconButton>
 		</div>
 	</div>
 </template>

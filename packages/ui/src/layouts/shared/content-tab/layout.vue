@@ -526,6 +526,9 @@ const tableItems = computed<ContentCardTableItem[]>(() => {
 			clientWarning,
 			hideDelete: base.hideDelete,
 			hideSwitchVersion: base.hideSwitchVersion ?? !base.versionLink,
+			// Дешева ознака «меню є» — щоб рядок не будував пункти лише заради
+			// того, щоб вирішити, чи показувати кнопку «⋮»
+			hasOverflowOptions: !!ctx.getOverflowOptions || !!modGroups?.canGroup(item),
 			get overflowOptions() {
 				let options = overflowByItem.get(id)
 				if (!options) {
@@ -719,50 +722,98 @@ const groupedSections = computed<GroupedSection[]>(() =>
 )
 
 // Віртуалізація рятує лише велику секцію; коли груп десяток по 10-20 модів,
-// одночасно створюється все одно пів тисячі компонентів і вкладка
-// відкривається ривком. Тому рядки секції створюються не одразу, а коли до неї
-// докручують: заголовки всіх груп є завжди (вони дешеві), а вміст доростає
-// згори вниз. Секція, яку вже показали, лишається змонтованою — інакше
-// прокрутка назад смикалася б.
-const SECTIONS_AT_ONCE = 3
-/** На скільки секцій наперед готуємо вміст, коли до групи докрутили */
-const SECTIONS_AHEAD = 2
+// одночасно створюється все одно пів тисячі компонентів. Тому в DOM тримаємо
+// лише ті секції, що поруч з видимою областю: секція, від якої відкрутили,
+// вивантажується, а на її місці лишається розпірка тієї ж висоти — тож
+// прокрутка не стрибає, а список не росте нескінченно.
 /** Запас у пікселях: секція монтується ще до появи в полі зору */
 const SECTION_PREFETCH_PX = 600
-const mountedSectionCount = ref(SECTIONS_AT_ONCE)
+/**
+ * Вивантажуємо лише те, що відкотилося значно далі, ніж межа монтування.
+ * З однією межею секція на її краю то з'являлася, то зникала — у замірах це
+ * було видно як десяток монтувань сітки за три секунди.
+ */
+const SECTION_RELEASE_PX = 2000
+/** Висота рядка списку — щоб оцінити розпірку до першого вимірювання */
+const SECTION_ROW_ESTIMATE_PX = 75
+const nearSections = ref(new Set<string>())
+const sectionHeights = ref<Record<string, number>>({})
+const sectionBodies = new Map<string, HTMLElement>()
+const observerUnavailable = ref(false)
 let sectionObserver: IntersectionObserver | null = null
+let sectionReleaseObserver: IntersectionObserver | null = null
 
-function noteSectionVisible(index: number) {
-	const wanted = index + SECTIONS_AHEAD
-	if (wanted > mountedSectionCount.value) mountedSectionCount.value = wanted
+function registerSectionBody(element: Element | null, key: string) {
+	if (element instanceof HTMLElement) sectionBodies.set(key, element)
+	else sectionBodies.delete(key)
 }
 
-function observeSection(element: Element | null, index: number) {
+/** Чи тримати рядки цієї секції в DOM */
+function isSectionMounted(key: string) {
+	return observerUnavailable.value || nearSections.value.has(key)
+}
+
+/** Скільки місця лишити замість вивантаженої секції */
+function sectionPlaceholderHeight(section: GroupedSection) {
+	return sectionHeights.value[section.key] ?? section.items.length * SECTION_ROW_ESTIMATE_PX
+}
+
+function observeSection(element: Element | null, _key: string) {
 	if (!(element instanceof HTMLElement)) return
-	element.dataset.sectionIndex = String(index)
 	if (typeof IntersectionObserver === 'undefined') {
 		// Немає спостерігача — краще показати все, ніж лишити порожні заголовки
-		noteSectionVisible(groupedSections.value.length)
+		observerUnavailable.value = true
 		return
 	}
 	if (!sectionObserver) {
 		sectionObserver = new IntersectionObserver(
 			(entries) => {
+				const next = new Set(nearSections.value)
+				let changed = false
 				for (const entry of entries) {
 					if (!entry.isIntersecting) continue
-					const index = Number((entry.target as HTMLElement).dataset.sectionIndex)
-					if (Number.isFinite(index)) noteSectionVisible(index)
+					const key = (entry.target as HTMLElement).dataset.groupKey
+					if (key && !next.has(key)) {
+						next.add(key)
+						changed = true
+					}
 				}
+				if (changed) nearSections.value = next
 			},
 			{ rootMargin: `${SECTION_PREFETCH_PX}px 0px` },
 		)
+		sectionReleaseObserver = new IntersectionObserver(
+			(entries) => {
+				const next = new Set(nearSections.value)
+				let changed = false
+				for (const entry of entries) {
+					if (entry.isIntersecting) continue
+					const key = (entry.target as HTMLElement).dataset.groupKey
+					if (!key || !next.has(key)) continue
+					// Міряємо, поки вміст ще в DOM: інакше розпірка стане не тієї
+					// висоти й сторінка смикнеться під курсором
+					const body = sectionBodies.get(key)
+					if (body) {
+						sectionHeights.value = { ...sectionHeights.value, [key]: body.offsetHeight }
+					}
+					next.delete(key)
+					changed = true
+				}
+				if (changed) nearSections.value = next
+			},
+			{ rootMargin: `${SECTION_RELEASE_PX}px 0px` },
+		)
 	}
 	sectionObserver.observe(element)
+	sectionReleaseObserver?.observe(element)
 }
 
 onBeforeUnmount(() => {
 	sectionObserver?.disconnect()
+	sectionReleaseObserver?.disconnect()
 	sectionObserver = null
+	sectionReleaseObserver = null
+	sectionBodies.clear()
 })
 
 function isGroupCollapsed(key: string) {
@@ -1840,9 +1891,9 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 						<template v-if="showGroupedSections">
 							<div class="mt-2 flex flex-col gap-3">
 								<section
-									v-for="(section, sectionIndex) in groupedSections"
+									v-for="section in groupedSections"
 									:key="section.key"
-									:ref="(el) => observeSection(el as Element | null, sectionIndex)"
+									:ref="(el) => observeSection(el as Element | null, section.key)"
 									class="mod-group rounded-2xl border border-solid bg-surface-1 transition-colors"
 									:class="[
 										dropTargetKey === section.key
@@ -1924,10 +1975,11 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 									     змонтованими (на великих збірках це сотні компонентів) -->
 									<div
 										v-if="
-											sectionIndex < mountedSectionCount &&
+											isSectionMounted(section.key) &&
 											!isGroupCollapsed(section.key) &&
 											(section.items.length > 0 || section.totalItems === 0)
 										"
+										:ref="(el) => registerSectionBody(el as Element | null, section.key)"
 										class="px-2 pb-2"
 									>
 										<component
@@ -1959,6 +2011,13 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 											</template>
 										</component>
 									</div>
+									<!-- Вивантажена секція: тримаємо її висоту, щоб смуга прокрутки
+									     й позиція сторінки не мінялися -->
+									<div
+										v-else-if="!isGroupCollapsed(section.key) && section.items.length > 0"
+										:style="{ height: `${sectionPlaceholderHeight(section)}px` }"
+										aria-hidden="true"
+									/>
 								</section>
 								<div class="flex flex-wrap items-center gap-2">
 									<Button type="outlined" @click="promptCreateGroup()">

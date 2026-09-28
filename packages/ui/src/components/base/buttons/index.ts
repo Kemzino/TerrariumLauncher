@@ -1,4 +1,5 @@
 export { default as Button } from './Button.vue'
+export { buttonClasses, buttonColorStyle } from './button-classes'
 export { default as ButtonGroup } from './ButtonGroup.vue'
 export { default as ButtonLink } from './ButtonLink.vue'
 export { default as CheckCircleButton } from './CheckCircleButton.vue'

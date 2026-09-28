@@ -79,6 +79,12 @@ export interface ContentCardTableItem {
 	hideDelete?: boolean
 	hideSwitchVersion?: boolean
 	overflowOptions?: ButtonMenuOption[]
+	/**
+	 * Чи є в рядка меню «⋮». Дозволяє не будувати самі пункти, поки меню не
+	 * відкрили: на довгих списках їх збирання (десятки ICU-рядків на рядок)
+	 * коштує помітно дорожче за сам рядок.
+	 */
+	hasOverflowOptions?: boolean
 }
 
 export type ContentCardTableSortColumn = 'project' | 'version'

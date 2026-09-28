@@ -51,7 +51,7 @@ import { saveWindowState, StateFlags } from '@tauri-apps/plugin-window-state'
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 
-import terrariumLogo from '@/assets/terrarium/logo.gif'
+import terrariumLogo from '@/assets/terrarium/logo.png'
 import AppActionBar from '@/components/ui/AppActionBar.vue'
 import Breadcrumbs from '@/components/ui/Breadcrumbs.vue'
 import ErrorModal from '@/components/ui/ErrorModal.vue'
@@ -102,12 +102,7 @@ import {
 	set_global_synced_option,
 } from '@/helpers/instance'
 import { maxMemoryQueryOptions } from '@/helpers/jre.js'
-import {
-	get as getCreds,
-	getAll as getAllCreds,
-	login,
-	removeUser,
-} from '@/helpers/mr_auth.ts'
+import { get as getCreds, getAll as getAllCreds, login, removeUser } from '@/helpers/mr_auth.ts'
 import { mergeUrlQuery, parseModrinthLink } from '@/helpers/project-links.ts'
 import {
 	appSettingsKeys,
@@ -2335,6 +2330,8 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	}
 }
 
+/* У шапці лишається старий статичний знак: анімована композиція з орбітальним
+   написом на 28px нечитабельна */
 .terrarium-wordmark__logo {
 	height: 1.75rem;
 	width: auto;
