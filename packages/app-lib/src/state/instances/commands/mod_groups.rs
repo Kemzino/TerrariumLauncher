@@ -831,8 +831,10 @@ pub(crate) async fn apply_pack_groups(
     let mut moved = 0;
     for (file_name, group) in groups {
         // Файл міг бути й вимкненим (.disabled), і вже в якійсь групі
+        // Not a stale row whose file is gone (it would point at the wrong place)
         let current = files.iter().find(|f| {
-            f.relative_path.starts_with(&format!("{MODS_FOLDER}/"))
+            !f.missing
+                && f.relative_path.starts_with(&format!("{MODS_FOLDER}/"))
                 && f.file_name.trim_end_matches(DISABLED_SUFFIX) == file_name
         });
         let from = match current {

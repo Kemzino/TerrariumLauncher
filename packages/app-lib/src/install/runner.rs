@@ -1263,7 +1263,14 @@ async fn remove_existing_imported_pack_content(
         let Some(file) = files.get(&file_id) else {
             continue;
         };
-        crate::util::io::remove_file(base.join(&file.relative_path)).await?;
+        // Terrarium: the row can point at a path where the file no longer is (moved between mod groups or by
+        // hand; the row was only marked missing). Nothing to delete then — drop the row and go on instead of
+        // failing the whole pack update.
+        match crate::util::io::remove_file(base.join(&file.relative_path)).await {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
         let mut tx = state.pool.begin().await?;
         content_rows::remove_content_entries_for_file(
             &metadata.applied_content_set.id,
