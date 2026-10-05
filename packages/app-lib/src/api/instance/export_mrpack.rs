@@ -28,6 +28,9 @@ const DEFAULT_SELECTED_EXPORT_PATH_PREFIXES: &[&str] = &[
     "resourcepacks",
     "shaderpacks",
     "config",
+    // Terrarium: scripts and data of the pack (planet worldgen, recipes) and the configs new worlds start with
+    "kubejs",
+    "defaultconfigs",
 ];
 const EXPORT_CANDIDATE_METADATA_CONCURRENCY: usize = 32;
 const EXPORT_COPY_BUFFER_SIZE: usize = 256 * 1024;

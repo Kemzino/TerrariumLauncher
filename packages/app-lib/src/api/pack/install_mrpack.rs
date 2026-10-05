@@ -45,6 +45,44 @@ type ExtractProgressFn<'a> = dyn FnMut(u64) -> Pin<Box<dyn Future<Output = crate
 type HashProgressFn<'a> = dyn FnMut(u64) -> crate::Result<()> + Send + 'a;
 const MODPACK_CONTENT_DOWNLOAD_CONCURRENCY: usize = 4;
 const MRPACK_WARNING_IGNORED_EXTENSIONS: &[&str] = &["rpo"];
+/// Terrarium: where a pack update parks the previous version's files instead of deleting them; a file the new
+/// version still has (same path, same SHA-1) is moved back instead of downloaded again.
+pub(crate) const UPDATE_STASH_DIR: &str = ".terrarium-update";
+
+/// Terrarium: moves the stashed copy of `relative` back to `target` when it is exactly the file the pack wants.
+/// Returns its size and SHA-1, or `None` when there is no such copy (then the file is downloaded as usual).
+async fn reuse_stashed_file(
+    instance_full_path: &Path,
+    relative: &str,
+    target: &Path,
+    expected_sha1: Option<&str>,
+) -> Option<(u64, String)> {
+    let expected_sha1 = expected_sha1?;
+    let stashed = instance_full_path.join(UPDATE_STASH_DIR).join(relative);
+    if !stashed.is_file() {
+        return None;
+    }
+    let to_hash = stashed.clone();
+    let (size, sha1) = tokio::task::spawn_blocking(move || {
+        let bytes = std::fs::read(&to_hash).ok()?;
+        let mut hasher = sha1_smol::Sha1::new();
+        hasher.update(&bytes);
+        Some((bytes.len() as u64, hasher.digest().to_string()))
+    })
+    .await
+    .ok()??;
+    if !sha1.eq_ignore_ascii_case(expected_sha1) {
+        return None;
+    }
+    if let Some(parent) = target.parent() {
+        io::create_dir_all(parent).await.ok()?;
+    }
+    if target.exists() {
+        io::remove_file(target).await.ok()?;
+    }
+    io::rename_or_move(&stashed, target).await.ok()?;
+    Some((size, sha1))
+}
 
 fn is_ignored_mrpack_warning_file(path: &str) -> bool {
     Path::new(path)
@@ -779,6 +817,17 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                     .set_transient_context(context.clone())
                     .await?;
 
+                // Terrarium: the same file from the previous pack version, parked by the update — no download.
+                let reused = reuse_stashed_file(
+                    &content_context.instance_full_path,
+                    project.path.as_str(),
+                    &target_path,
+                    project.hashes.get(&PackFileHash::Sha1).map(|x| &**x),
+                )
+                .await;
+                let (downloaded_bytes, file_sha1) = if let Some(reused) = reused {
+                    reused
+                } else {
                 let progress_key = project_path.clone();
                 let progress_context = content_context.clone();
                 let min_download_progress_delta =
@@ -864,16 +913,18 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                         return Err(error);
                     }
                 };
-                let downloaded_bytes = file.size;
 
-                let path = target_path;
+                let path = &target_path;
 				content_context
 					.reporter
 					.preserve_failure_context(
 						context.clone(),
-						file.copy_to(&path, &state.io_semaphore).await,
+						file.copy_to(path, &state.io_semaphore).await,
 					)
 					.await?;
+                (file.size, file.sha1.clone())
+                };
+                let path = target_path;
 				let modified_at_ns = crate::state::file_modified_at_ns(
 					&io::metadata(&path).await?,
 				)?;
@@ -887,9 +938,9 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                             cache_file_hash_metadata(
 								&content_context.instance_path,
 								project.path.as_str(),
-								file.size,
+								downloaded_bytes,
 								modified_at_ns,
-								file.sha1.clone(),
+								file_sha1.clone(),
                                 ProjectType::get_from_parent_folder(&path),
                                 None,
                                 &state.pool,
@@ -954,6 +1005,9 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
         },
     )
     .await?;
+
+    // Terrarium: whatever the update parked and the new version did not take back is gone from the pack.
+    let _ = io::remove_dir_all(instance_full_path.join(UPDATE_STASH_DIR)).await;
 
     let has_override =
         |path: &str| {

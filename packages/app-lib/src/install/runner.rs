@@ -1263,13 +1263,24 @@ async fn remove_existing_imported_pack_content(
         let Some(file) = files.get(&file_id) else {
             continue;
         };
-        // Terrarium: the row can point at a path where the file no longer is (moved between mod groups or by
-        // hand; the row was only marked missing). Nothing to delete then — drop the row and go on instead of
-        // failing the whole pack update.
-        match crate::util::io::remove_file(base.join(&file.relative_path)).await {
-            Ok(()) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err.into()),
+        // Terrarium: the file is parked, not deleted — the new version takes it back if it still has it (same
+        // path and SHA-1), so an update downloads only what changed. The row can point at a path where the file
+        // no longer is (moved between mod groups or by hand; the row was only marked missing): nothing to park
+        // then — drop the row and go on instead of failing the whole pack update.
+        let current = base.join(&file.relative_path);
+        if current.is_file() {
+            let parked = base
+                .join(crate::api::pack::install_mrpack::UPDATE_STASH_DIR)
+                .join(&file.relative_path);
+            if parked.exists() {
+                crate::util::io::remove_file(&parked).await?;
+            }
+            if let Some(parent) = parked.parent() {
+                crate::util::io::create_dir_all(parent).await?;
+            }
+            if crate::util::io::rename_or_move(&current, &parked).await.is_err() {
+                crate::util::io::remove_file(&current).await?;
+            }
         }
         let mut tx = state.pool.begin().await?;
         content_rows::remove_content_entries_for_file(
