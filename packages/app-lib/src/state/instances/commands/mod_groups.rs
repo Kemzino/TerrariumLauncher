@@ -525,21 +525,31 @@ pub(crate) async fn set_mod_group(
         io::create_dir_all(mods_dir.join(segments)).await?;
     }
     io::rename_or_move(base.join(project_path), base.join(&new_path)).await?;
-    ensure_readme(&mods_dir).await?;
 
+    // Terrarium: the file and its row move together. If the database refuses (it was found locked once), the file
+    // goes back, or the row would point at a path where the file no longer is and the next pack update would fail.
     let enabled = !file_name.ends_with(DISABLED_SUFFIX)
         && !group_disabled_in_path(&new_path);
-    let mut tx = state.pool.begin().await?;
-    content_rows::rename_instance_file(
-        &scope.instance.id,
-        project_path,
-        &new_path,
-        &file_name,
-        enabled,
-        &mut tx,
-    )
-    .await?;
-    tx.commit().await?;
+    let renamed: crate::Result<()> = async {
+        let mut tx = state.pool.begin().await?;
+        content_rows::rename_instance_file(
+            &scope.instance.id,
+            project_path,
+            &new_path,
+            &file_name,
+            enabled,
+            &mut tx,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+    .await;
+    if let Err(err) = renamed {
+        let _ = io::rename_or_move(base.join(&new_path), base.join(project_path)).await;
+        return Err(err);
+    }
+    ensure_readme(&mods_dir).await?;
     Ok(new_path)
 }
 
@@ -767,6 +777,9 @@ pub(crate) async fn flatten_for_pack_update(
         )
         .into());
     }
+    // Terrarium: rows first catch up with the disk (a mod deleted or moved by hand is marked missing), and a row
+    // whose file is still not where it says is skipped — it must not abort the whole pack update.
+    crate::state::sync_content_files(instance_id, state).await?;
     let files =
         content_rows::get_instance_files(&scope.instance.id, &state.pool)
             .await?;
@@ -776,6 +789,9 @@ pub(crate) async fn flatten_for_pack_update(
         let Some(group) = group_of(&file.relative_path) else {
             continue;
         };
+        if !instance_dir.join(&file.relative_path).is_file() {
+            continue;
+        }
         set_mod_group(instance_id, &file.relative_path, None, state).await?;
         map.files.insert(file.file_name.clone(), group);
     }
