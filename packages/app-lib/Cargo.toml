@@ -121,6 +121,7 @@ urlencoding = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 whoami = { workspace = true }
 zbus = { workspace = true }
+tar = { workspace = true }
 zip = { workspace = true }
 
 [build-dependencies]

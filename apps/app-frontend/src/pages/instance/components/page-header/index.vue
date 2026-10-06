@@ -70,6 +70,11 @@
 
 		<template #actions>
 			<PageHeaderActions>
+				<JavaRuntimeToggle
+					v-if="!isServerInstance"
+					:instance-id="instance.id"
+					:disabled="playing || loading || isInstalling || instance.quarantined"
+				/>
 				<Button
 					v-if="isInstalling"
 					type="colored"
@@ -206,6 +211,7 @@ import { computed } from 'vue'
 import type { GameInstance } from '@/helpers/types'
 
 import InstanceHeaderServerMetadata from './instance-page-header-server-metadata.vue'
+import JavaRuntimeToggle from './JavaRuntimeToggle.vue'
 
 const messages = defineMessages({
 	createShortcut: {

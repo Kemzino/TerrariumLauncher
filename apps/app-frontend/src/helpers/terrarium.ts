@@ -408,3 +408,28 @@ export async function terrarium_set_mod_group(
 		group,
 	})
 }
+
+// ---------------------------------------------------------------------------
+// Java примірника: стандартна Java лаунчера або GraalVM
+
+export interface GraalvmStatus {
+	/** Для цієї ОС/архітектури GraalVM взагалі є */
+	available: boolean
+	/** Уже завантажена */
+	installed: boolean
+	/** Примірник запускається з нею */
+	enabled: boolean
+	major_version: number
+}
+
+export async function terrarium_graalvm_status(instanceId: string) {
+	return await invoke<GraalvmStatus>('plugin:terrarium|terrarium_graalvm_status', { instanceId })
+}
+
+/** Перемикає примірник на GraalVM (за потреби спершу завантажує) або назад на стандартну Java. */
+export async function terrarium_set_graalvm(instanceId: string, enabled: boolean) {
+	return await invoke<GraalvmStatus>('plugin:terrarium|terrarium_set_graalvm', {
+		instanceId,
+		enabled,
+	})
+}

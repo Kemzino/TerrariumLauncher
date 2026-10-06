@@ -379,6 +379,8 @@ fn main() {
                         "terrarium_curseforge_search",
                         "terrarium_curseforge_install",
                         "terrarium_curseforge_prepare_modpack",
+                        "terrarium_graalvm_status",
+                        "terrarium_set_graalvm",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

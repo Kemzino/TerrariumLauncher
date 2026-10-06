@@ -9,6 +9,7 @@ use theseus::terrarium::{
 use theseus::terrarium_modrinth::{
     self, ModrinthAppInfo, ModrinthImportResult,
 };
+use theseus::terrarium_java::{self, GraalvmStatus};
 use theseus::terrarium_sync::{self, SyncPreview, SyncRequest, SyncResult};
 
 pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
@@ -49,6 +50,8 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             terrarium_curseforge_search,
             terrarium_curseforge_install,
             terrarium_curseforge_prepare_modpack,
+            terrarium_graalvm_status,
+            terrarium_set_graalvm,
         ])
         .build()
 }
@@ -423,4 +426,17 @@ pub async fn terrarium_list_releases(
         limit.unwrap_or(20),
     )
     .await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_graalvm_status(instance_id: String) -> Result<GraalvmStatus> {
+    Ok(terrarium_java::status(&instance_id).await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_set_graalvm(
+    instance_id: String,
+    enabled: bool,
+) -> Result<GraalvmStatus> {
+    Ok(terrarium_java::set_enabled(&instance_id, enabled).await?)
 }
