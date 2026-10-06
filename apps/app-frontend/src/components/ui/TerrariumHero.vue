@@ -171,10 +171,10 @@ const messages = defineMessages({
 		id: 'terrarium.hero.changelog-unread',
 		defaultMessage: 'Є нові зміни, яких ти ще не бачив',
 	},
-	reports: { id: 'terrarium.hero.reports', defaultMessage: 'Звіти про лаги' },
+	reports: { id: 'terrarium.hero.reports', defaultMessage: 'Репорти' },
 	reportsUnread: {
 		id: 'terrarium.hero.reports-unread',
-		defaultMessage: 'Нових звітів: {count}',
+		defaultMessage: 'Нових репортів: {count}',
 	},
 	unknownLatest: {
 		id: 'terrarium.hero.unknown-latest',
@@ -258,10 +258,10 @@ watch([activePack, activeChannel], readChangelogSeen, { immediate: true })
 function openChangelog() {
 	changelogModal.value?.show()
 }
-// Звіти про лаги з гри (лише для адміна): непрочитані — новіші за переглянутий номер
+// Репорти з гри (баги, FPS, TPS) (лише для адміна): непрочитані — новіші за переглянутий номер
 const reportsModal = ref<InstanceType<typeof TerrariumReportsModal> | null>(null)
 const reportsSeen = ref(readReportsSeen())
-// Список оновлюється сам: звіт може прийти, поки лаунчер відкритий
+// Список оновлюється сам: репорт може прийти, поки лаунчер відкритий
 const reportsQuery = useQuery({
 	queryKey: ['terrarium', 'perf-reports'],
 	queryFn: () => terrarium_list_perf_reports(30),

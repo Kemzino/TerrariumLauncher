@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-// Terrarium: звіти про лаги, які гравці надсилають кнопкою в меню паузи
+// Terrarium: репорти (баги, FPS, TPS), які гравці надсилають кнопкою в меню паузи
 // (TerrariumWorld → issues з міткою performance-report). Непрочитані — новіші
 // за останній переглянутий номер, він зберігається локально.
 import { CheckIcon, ChevronRightIcon, ExternalIcon, SpinnerIcon } from '@modrinth/assets'
@@ -84,9 +84,9 @@ import {
 const { formatMessage } = useVIntl()
 
 const messages = defineMessages({
-	header: { id: 'terrarium.reports.header', defaultMessage: 'Звіти гравців про лаги' },
-	loading: { id: 'terrarium.reports.loading', defaultMessage: 'Завантажую звіти…' },
-	empty: { id: 'terrarium.reports.empty', defaultMessage: 'Звітів ще немає.' },
+	header: { id: 'terrarium.reports.header', defaultMessage: 'Репорти гравців: баги, FPS, TPS' },
+	loading: { id: 'terrarium.reports.loading', defaultMessage: 'Завантажую репорти…' },
+	empty: { id: 'terrarium.reports.empty', defaultMessage: 'Репортів ще немає.' },
 	unread: { id: 'terrarium.reports.unread', defaultMessage: 'Нове' },
 	closed: { id: 'terrarium.reports.closed', defaultMessage: 'Закрито' },
 	openIssue: { id: 'terrarium.reports.open-issue', defaultMessage: 'Відкрити на GitHub' },
@@ -99,7 +99,7 @@ const reports = ref<TerrariumPerfReport[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const expanded = ref(new Set<number>())
-/** Номер останнього звіту, який адмін уже бачив (на момент відкриття) */
+/** Номер останнього репорту, який адмін уже бачив (на момент відкриття) */
 const seenNumber = ref(0)
 
 function isUnread(number: number) {
