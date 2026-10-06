@@ -6,10 +6,10 @@ use theseus::terrarium::{
     self, AdminInfo, Channel, ContentGroup, PackKind, PublishPreview,
     PublishRequest, PublishedRelease, TerrariumRelease, TerrariumState,
 };
+use theseus::terrarium_java::{self, GraalvmStatus};
 use theseus::terrarium_modrinth::{
     self, ModrinthAppInfo, ModrinthImportResult,
 };
-use theseus::terrarium_java::{self, GraalvmStatus};
 use theseus::terrarium_sync::{self, SyncPreview, SyncRequest, SyncResult};
 
 pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
@@ -19,6 +19,7 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             terrarium_set_state,
             terrarium_fetch_latest_release,
             terrarium_list_releases,
+            terrarium_list_perf_reports,
             terrarium_download_release,
             terrarium_verify_admin_token,
             terrarium_publish_release,
@@ -323,12 +324,16 @@ pub async fn terrarium_curseforge_get_mod(
     mod_id: u64,
     force: Option<bool>,
 ) -> Result<theseus::terrarium_curseforge::CurseForgeMod> {
-    Ok(theseus::terrarium_curseforge::get_mod(mod_id, force.unwrap_or(false))
-        .await?)
+    Ok(
+        theseus::terrarium_curseforge::get_mod(mod_id, force.unwrap_or(false))
+            .await?,
+    )
 }
 
 #[tauri::command]
-pub async fn terrarium_curseforge_get_description(mod_id: u64) -> Result<String> {
+pub async fn terrarium_curseforge_get_description(
+    mod_id: u64,
+) -> Result<String> {
     Ok(theseus::terrarium_curseforge::get_mod_description(mod_id).await?)
 }
 
@@ -337,7 +342,10 @@ pub async fn terrarium_curseforge_get_changelog(
     mod_id: u64,
     file_id: u64,
 ) -> Result<String> {
-    Ok(theseus::terrarium_curseforge::get_file_changelog(mod_id, file_id).await?)
+    Ok(
+        theseus::terrarium_curseforge::get_file_changelog(mod_id, file_id)
+            .await?,
+    )
 }
 
 #[derive(serde::Serialize)]
@@ -428,8 +436,18 @@ pub async fn terrarium_list_releases(
     .await?)
 }
 
+/// Звіти гравців про лаги (issues з міткою `performance-report`) для адміна.
 #[tauri::command]
-pub async fn terrarium_graalvm_status(instance_id: String) -> Result<GraalvmStatus> {
+pub async fn terrarium_list_perf_reports(
+    limit: Option<u32>,
+) -> Result<Vec<terrarium::TerrariumPerfReport>> {
+    Ok(terrarium::list_perf_reports(limit.unwrap_or(50)).await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_graalvm_status(
+    instance_id: String,
+) -> Result<GraalvmStatus> {
     Ok(terrarium_java::status(&instance_id).await?)
 }
 

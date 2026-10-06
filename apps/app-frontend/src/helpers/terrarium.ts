@@ -73,6 +73,43 @@ export async function terrarium_list_releases(pack: PackKind, channel: Channel, 
 	})
 }
 
+/** Звіт гравця про лаги — issue з міткою performance-report (див. app-lib `TerrariumPerfReport`) */
+export type TerrariumPerfReport = {
+	number: number
+	title: string
+	body: string
+	open: boolean
+	created_at: string
+	html_url: string
+	comments: number
+}
+
+/** Звіти про лаги, які гравці надіслали з гри (новіші перші) */
+export async function terrarium_list_perf_reports(limit = 50) {
+	return await invoke<TerrariumPerfReport[]>('plugin:terrarium|terrarium_list_perf_reports', {
+		limit,
+	})
+}
+
+const REPORTS_SEEN_KEY = 'terrarium-reports-seen'
+
+/** Номер останнього звіту про лаги, який адмін уже переглянув */
+export function readReportsSeen(): number {
+	try {
+		return Number(localStorage.getItem(REPORTS_SEEN_KEY)) || 0
+	} catch {
+		return 0
+	}
+}
+
+export function writeReportsSeen(number: number) {
+	try {
+		localStorage.setItem(REPORTS_SEEN_KEY, String(number))
+	} catch {
+		// без localStorage — просто не запам'ятаємо
+	}
+}
+
 /** Чи є ключ CurseForge (з налаштувань або вбудований) */
 export async function terrarium_curseforge_has_key() {
 	return await invoke<boolean>('plugin:terrarium|terrarium_curseforge_has_key')

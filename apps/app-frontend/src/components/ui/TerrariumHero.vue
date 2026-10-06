@@ -12,6 +12,7 @@ import {
 	PackageOpenIcon,
 	PlayIcon,
 	RefreshCwIcon,
+	ReportIcon,
 	RocketIcon,
 	ServerStackIcon,
 	SpinnerIcon,
@@ -31,6 +32,7 @@ import TerrariumChangelogModal from '@/components/ui/TerrariumChangelogModal.vue
 import TerrariumInstancePicker from '@/components/ui/TerrariumInstancePicker.vue'
 import TerrariumNewsWidget from '@/components/ui/TerrariumNewsWidget.vue'
 import TerrariumPublishModal from '@/components/ui/TerrariumPublishModal.vue'
+import TerrariumReportsModal from '@/components/ui/TerrariumReportsModal.vue'
 import TerrariumServerStatusWidget from '@/components/ui/TerrariumServerStatusWidget.vue'
 import TerrariumSyncModal from '@/components/ui/TerrariumSyncModal.vue'
 import { useAppEvent } from '@/composables/use-app-event'
@@ -51,9 +53,11 @@ import {
 	type PackKind,
 	packStateKey,
 	type PublishedRelease,
+	readReportsSeen,
 	terrarium_apply_pack_branding,
 	terrarium_download_release,
 	terrarium_fetch_latest_release,
+	terrarium_list_perf_reports,
 	terrarium_prepare_pack_update,
 	terrarium_promote_release,
 	type TerrariumRelease,
@@ -167,6 +171,11 @@ const messages = defineMessages({
 		id: 'terrarium.hero.changelog-unread',
 		defaultMessage: 'Є нові зміни, яких ти ще не бачив',
 	},
+	reports: { id: 'terrarium.hero.reports', defaultMessage: 'Звіти про лаги' },
+	reportsUnread: {
+		id: 'terrarium.hero.reports-unread',
+		defaultMessage: 'Нових звітів: {count}',
+	},
 	unknownLatest: {
 		id: 'terrarium.hero.unknown-latest',
 		defaultMessage: 'Встановлено {tag} · не вдалося перевірити, чи є новіша',
@@ -248,6 +257,25 @@ const changelogUnread = computed(
 watch([activePack, activeChannel], readChangelogSeen, { immediate: true })
 function openChangelog() {
 	changelogModal.value?.show()
+}
+// Звіти про лаги з гри (лише для адміна): непрочитані — новіші за переглянутий номер
+const reportsModal = ref<InstanceType<typeof TerrariumReportsModal> | null>(null)
+const reportsSeen = ref(readReportsSeen())
+const reportNumbers = ref<number[]>([])
+const reportsUnread = computed(
+	() => reportNumbers.value.filter((n) => n > reportsSeen.value).length,
+)
+async function refreshReports() {
+	if (!isAdmin.value) return
+	try {
+		reportNumbers.value = (await terrarium_list_perf_reports(30)).map((r) => r.number)
+	} catch {
+		/* немає мережі — лише без позначки */
+	}
+}
+watch(isAdmin, refreshReports, { immediate: true })
+function openReports() {
+	reportsModal.value?.show()
 }
 const syncModal = ref<InstanceType<typeof TerrariumSyncModal> | null>(null)
 // Синхронізація працює з примірниками поточного каналу; якщо в каналі збірки
@@ -797,6 +825,24 @@ onMounted(async () => {
 							aria-hidden="true"
 						></span>
 					</Button>
+					<Button
+						v-if="isAdmin"
+						v-tooltip="
+							reportsUnread > 0
+								? formatMessage(messages.reportsUnread, { count: reportsUnread })
+								: undefined
+						"
+						size="xl"
+						class="relative"
+						@click="openReports"
+					>
+						<ReportIcon /> {{ formatMessage(messages.reports) }}
+						<span
+							v-if="reportsUnread > 0"
+							class="absolute -right-1 -top-1 size-3 rounded-full bg-orange ring-2 ring-[var(--color-raised-bg)]"
+							aria-hidden="true"
+						></span>
+					</Button>
 					<!-- Публікація — лише для клієнтської збірки: серверна на сервер із GitHub
 					     не підтягується, тож кнопка там лише вводила б в оману. -->
 					<Button
@@ -905,6 +951,7 @@ onMounted(async () => {
 			@seen="(tag) => (changelogSeenTag = tag)"
 		/>
 		<TerrariumSyncModal ref="syncModal" @synced="onSynced" />
+		<TerrariumReportsModal ref="reportsModal" @seen="(n) => (reportsSeen = n)" />
 	</section>
 </template>
 

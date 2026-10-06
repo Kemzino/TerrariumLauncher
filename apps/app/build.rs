@@ -348,6 +348,7 @@ fn main() {
                         "terrarium_set_state",
                         "terrarium_fetch_latest_release",
                         "terrarium_list_releases",
+                        "terrarium_list_perf_reports",
                         "terrarium_download_release",
                         "terrarium_verify_admin_token",
                         "terrarium_publish_release",

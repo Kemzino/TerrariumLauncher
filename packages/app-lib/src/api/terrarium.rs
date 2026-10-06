@@ -474,6 +474,63 @@ pub async fn list_releases(
         .collect())
 }
 
+/// Мітка issues, якими гра (TerrariumWorld, кнопка в меню паузи) надсилає звіти про лаги.
+pub const PERF_REPORT_LABEL: &str = "performance-report";
+
+/// Звіт гравця про лаги — issue клієнтського репозиторію з міткою `performance-report`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerrariumPerfReport {
+    pub number: u64,
+    pub title: String,
+    pub body: String,
+    pub open: bool,
+    pub created_at: String,
+    pub html_url: String,
+    pub comments: u64,
+}
+
+#[derive(Deserialize)]
+struct GithubIssue {
+    number: u64,
+    title: String,
+    body: Option<String>,
+    state: String,
+    created_at: String,
+    html_url: String,
+    #[serde(default)]
+    comments: u64,
+    /// Є лише в pull request-ів, які GitHub теж віддає списком issues
+    pull_request: Option<serde_json::Value>,
+}
+
+/// Останні звіти про лаги (новіші перші). Репозиторій публічний, тож ключ
+/// адміна не обов'язковий — з ним лише вищий ліміт запитів GitHub.
+#[tracing::instrument]
+pub async fn list_perf_reports(
+    limit: u32,
+) -> crate::Result<Vec<TerrariumPerfReport>> {
+    let token = read_token(&get_state().await?);
+    let url = format!(
+        "https://api.github.com/repos/{CLIENT_REPO}/issues?labels={PERF_REPORT_LABEL}&state=all&sort=created&direction=desc&per_page={}",
+        limit.clamp(1, 100)
+    );
+    let issues: Vec<GithubIssue> =
+        github_get_json(&url, token.as_deref(), "Звіти про лаги").await?;
+    Ok(issues
+        .into_iter()
+        .filter(|i| i.pull_request.is_none())
+        .map(|i| TerrariumPerfReport {
+            number: i.number,
+            title: i.title,
+            body: i.body.unwrap_or_default(),
+            open: i.state == "open",
+            created_at: i.created_at,
+            html_url: i.html_url,
+            comments: i.comments,
+        })
+        .collect())
+}
+
 /// Завантажує `.mrpack` релізу в кеш лаунчера і повертає шлях до файлу.
 /// Повторний виклик для того самого тегу нічого не качає.
 /// Качаємо через API asset-ів, а не `browser_download_url`, — так працює і
