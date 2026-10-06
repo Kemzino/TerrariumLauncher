@@ -261,19 +261,24 @@ function openChangelog() {
 // Звіти про лаги з гри (лише для адміна): непрочитані — новіші за переглянутий номер
 const reportsModal = ref<InstanceType<typeof TerrariumReportsModal> | null>(null)
 const reportsSeen = ref(readReportsSeen())
-const reportNumbers = ref<number[]>([])
+// Список оновлюється сам: звіт може прийти, поки лаунчер відкритий
+const reportsQuery = useQuery({
+	queryKey: ['terrarium', 'perf-reports'],
+	queryFn: () => terrarium_list_perf_reports(30),
+	enabled: isAdmin,
+	refetchInterval: 2 * 60 * 1000,
+	refetchIntervalInBackground: true,
+	refetchOnWindowFocus: true,
+	staleTime: 30 * 1000,
+	retry: false,
+})
 const reportsUnread = computed(
-	() => reportNumbers.value.filter((n) => n > reportsSeen.value).length,
+	() => (reportsQuery.data.value ?? []).filter((r) => r.number > reportsSeen.value).length,
 )
-async function refreshReports() {
-	if (!isAdmin.value) return
-	try {
-		reportNumbers.value = (await terrarium_list_perf_reports(30)).map((r) => r.number)
-	} catch {
-		/* немає мережі — лише без позначки */
-	}
+function onReportsSeen(latest: number) {
+	reportsSeen.value = latest
+	queryClient.invalidateQueries({ queryKey: ['terrarium', 'perf-reports'] })
 }
-watch(isAdmin, refreshReports, { immediate: true })
 function openReports() {
 	reportsModal.value?.show()
 }
@@ -951,7 +956,7 @@ onMounted(async () => {
 			@seen="(tag) => (changelogSeenTag = tag)"
 		/>
 		<TerrariumSyncModal ref="syncModal" @synced="onSynced" />
-		<TerrariumReportsModal ref="reportsModal" @seen="(n) => (reportsSeen = n)" />
+		<TerrariumReportsModal ref="reportsModal" @seen="onReportsSeen" />
 	</section>
 </template>
 
