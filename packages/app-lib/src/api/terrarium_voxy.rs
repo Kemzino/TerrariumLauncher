@@ -3,7 +3,7 @@
 //! (апстрім зібраний під Sodium 0.6 і крашиться на старті).
 //!
 //! Ліцензія Voxy — «All rights reserved, do not redistribute», тож у збірку його не кладемо: кожен гравець
-//! збирає мод у себе з вихідного коду на зафіксованому коміті, і jar іде лише в його власну теку `mods/`.
+//! збирає мод у себе з вихідного коду (останній коміт гілки [`BRANCH`]), і jar іде лише в його власну теку `mods/`.
 //!
 //! Без git і без встановленої Java: код — zip-архів коміту з GitHub, JDK — Azul Zulu (качається один раз
 //! у `meta/java_versions`), Gradle запускається напряму через `gradle-wrapper.jar`. Перевірки міксинів
@@ -20,16 +20,67 @@ use std::process::Stdio;
 use std::sync::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-/// Репозиторій порту і коміт, з якого збираємо.
+/// Репозиторій порту і гілка, з останнього коміту якої збираємо.
 pub const REPO: &str = "Kemzino/voxy-neoforge";
-pub const COMMIT: &str = "8d0eec4e0c15e518f54bb94ca19c2c837b5fe97a";
+pub const BRANCH: &str = "terrarium";
+/// Коміт на випадок, коли GitHub API недоступний (немає мережі, ліміт запитів).
+const FALLBACK_COMMIT: &str = "c0fa6e5ade99aa5bbbf355a838a06a4201e0c99b";
+/// Скільки тримаємо відповідь GitHub: статус кнопки питають часто, а без токена API дає 60 запитів на годину.
+const LATEST_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 const GAME_VERSION: &str = "1.21.1";
 const JDK_MAJOR: u32 = 21;
 /// Наші jar-и: `voxy-<версія>+<коміт>.jar`
 const JAR_PREFIX: &str = "voxy-";
 
-fn short_commit() -> &'static str {
-    &COMMIT[..7]
+fn short_commit(commit: &str) -> &str {
+    &commit[..7.min(commit.len())]
+}
+
+static LATEST: Mutex<Option<(String, std::time::Instant)>> = Mutex::new(None);
+
+/// Останній коміт гілки [`BRANCH`] (кешований на [`LATEST_TTL`]; `fresh` — питати GitHub попри кеш).
+/// Якщо GitHub не відповів — останній відомий коміт або [`FALLBACK_COMMIT`].
+async fn latest_commit(fresh: bool) -> String {
+    let cached = LATEST.lock().ok().and_then(|l| l.clone());
+    if let Some((commit, at)) = &cached
+        && !fresh
+        && at.elapsed() < LATEST_TTL
+    {
+        return commit.clone();
+    }
+    let url = format!("https://api.github.com/repos/{REPO}/commits/{BRANCH}");
+    let fetched = async {
+        REQWEST_CLIENT
+            .get(&url)
+            .header("Accept", "application/vnd.github.sha")
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await
+    }
+    .await;
+    match fetched {
+        Ok(sha)
+            if sha.trim().len() == 40
+                && sha.trim().chars().all(|c| c.is_ascii_hexdigit()) =>
+        {
+            let sha = sha.trim().to_ascii_lowercase();
+            if let Ok(mut l) = LATEST.lock() {
+                *l = Some((sha.clone(), std::time::Instant::now()));
+            }
+            sha
+        }
+        other => {
+            tracing::warn!(
+                "Voxy: не вдалося дізнатися останній коміт {REPO}@{BRANCH}: {:?}",
+                other.err()
+            );
+            cached
+                .map(|(c, _)| c)
+                .unwrap_or_else(|| FALLBACK_COMMIT.to_string())
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,7 +89,7 @@ pub struct VoxyStatus {
     pub compatible: bool,
     /// Назва встановленого jar Voxy, якщо є
     pub installed: Option<String>,
-    /// Встановлений jar зібрано з [`COMMIT`]
+    /// Встановлений jar зібрано з останнього коміту гілки
     pub up_to_date: bool,
     pub commit: String,
     pub repo: String,
@@ -186,15 +237,16 @@ pub async fn status(instance_id: &str) -> crate::Result<VoxyStatus> {
         .into_iter()
         .next()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
+    let commit = latest_commit(false).await;
     let up_to_date = installed
         .as_deref()
-        .is_some_and(|n| n.contains(&format!("+{}", short_commit())));
+        .is_some_and(|n| n.contains(&format!("+{}", short_commit(&commit))));
     let progress = current_progress().filter(|p| p.instance_id == instance_id);
     Ok(VoxyStatus {
         compatible,
         installed,
         up_to_date,
-        commit: COMMIT.to_string(),
+        commit,
         repo: REPO.to_string(),
         building: progress.is_some(),
         stage: progress.as_ref().map(|p| p.stage.clone()),
@@ -330,10 +382,11 @@ async fn install_jdk(instance_id: &str) -> crate::Result<PathBuf> {
         })
 }
 
-/// Вихідний код на [`COMMIT`] (zip з GitHub, git не потрібен).
+/// Вихідний код на коміті `commit` (zip з GitHub, git не потрібен).
 async fn fetch_source(
     instance_id: &str,
     work: &Path,
+    commit: &str,
 ) -> crate::Result<PathBuf> {
     let src = work.join("s");
     if src.exists() {
@@ -341,7 +394,7 @@ async fn fetch_source(
     }
     io::create_dir_all(work).await?;
     let archive = work.join("src.zip");
-    let url = format!("https://codeload.github.com/{REPO}/zip/{COMMIT}");
+    let url = format!("https://codeload.github.com/{REPO}/zip/{commit}");
     set_progress(instance_id, "Завантаження коду Voxy", 0.22);
     download(&url, &archive, |_| {}).await?;
     let unpacked = work.join("s-unpack");
@@ -565,9 +618,10 @@ async fn build_inner(instance_id: &str) -> crate::Result<()> {
         .into());
     }
 
+    let commit = latest_commit(true).await;
     let jdk_home = install_jdk(instance_id).await?;
     let work = work_root().await?;
-    let src = fetch_source(instance_id, &work).await?;
+    let src = fetch_source(instance_id, &work, &commit).await?;
     let gradle_home = work.join("g");
     let log_path = work.join("build.log");
     set_progress(instance_id, "Запуск Gradle", 0.24);
@@ -605,8 +659,10 @@ async fn build_inner(instance_id: &str) -> crate::Result<()> {
     for path in old {
         io::remove_file(&path).await?;
     }
-    let target =
-        mods.join(format!("{JAR_PREFIX}{version}+{}.jar", short_commit()));
+    let target = mods.join(format!(
+        "{JAR_PREFIX}{version}+{}.jar",
+        short_commit(&commit)
+    ));
     io::copy(&built, &target).await?;
 
     let state = State::get().await?;
@@ -616,7 +672,7 @@ async fn build_inner(instance_id: &str) -> crate::Result<()> {
     set_progress(instance_id, "Прибирання", 0.97);
     let _ = io::remove_dir_all(&work).await;
     tracing::info!(
-        "Voxy {version} ({COMMIT}) встановлено: {}",
+        "Voxy {version} ({commit}) встановлено: {}",
         target.display()
     );
 
