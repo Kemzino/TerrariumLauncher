@@ -57,6 +57,7 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             terrarium_voxy_status,
             terrarium_voxy_build,
             terrarium_voxy_remove,
+            terrarium_voxy_cancel,
         ])
         .build()
 }
@@ -476,4 +477,9 @@ pub async fn terrarium_voxy_build(instance_id: String) -> Result<VoxyStatus> {
 #[tauri::command]
 pub async fn terrarium_voxy_remove(instance_id: String) -> Result<VoxyStatus> {
     Ok(terrarium_voxy::remove(&instance_id).await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_voxy_cancel() -> Result<bool> {
+    Ok(terrarium_voxy::cancel())
 }

@@ -24,6 +24,18 @@
 			{{ label }}
 		</button>
 		<button
+			v-if="status.building"
+			v-tooltip="'Скасувати збірку'"
+			type="button"
+			:disabled="cancelling"
+			class="relative rounded-full px-2 py-1.5 text-secondary transition-colors hover:text-contrast"
+			:class="cancelling ? 'cursor-not-allowed opacity-60' : ''"
+			aria-label="Скасувати збірку Voxy"
+			@click="cancel"
+		>
+			✕
+		</button>
+		<button
 			v-if="status.installed && !status.building"
 			type="button"
 			:disabled="disabled"
@@ -43,8 +55,10 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import {
 	terrarium_voxy_build,
+	terrarium_voxy_cancel,
 	terrarium_voxy_remove,
 	terrarium_voxy_status,
+	VOXY_CANCELLED,
 	type VoxyStatus,
 } from '@/helpers/terrarium'
 
@@ -57,6 +71,7 @@ const props = defineProps<{
 const { handleError, addNotification } = injectNotificationManager()
 
 const status = ref<VoxyStatus | null>(null)
+const cancelling = ref(false)
 let poll: ReturnType<typeof setInterval> | null = null
 
 const label = computed(() => {
@@ -113,10 +128,26 @@ async function build() {
 		status.value = await terrarium_voxy_build(props.instanceId)
 		addNotification({ type: 'success', title: 'Voxy зібрано і встановлено' })
 	} catch (err) {
-		handleError(err as Error)
+		if (String((err as { message?: string })?.message ?? err).includes(VOXY_CANCELLED)) {
+			addNotification({ type: 'info', title: VOXY_CANCELLED })
+		} else {
+			handleError(err as Error)
+		}
 		await refresh()
 	} finally {
+		cancelling.value = false
 		stopPolling()
+	}
+}
+
+async function cancel() {
+	if (cancelling.value) return
+	cancelling.value = true
+	try {
+		await terrarium_voxy_cancel()
+	} catch (err) {
+		cancelling.value = false
+		handleError(err as Error)
 	}
 }
 

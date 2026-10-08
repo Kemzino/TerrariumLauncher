@@ -385,6 +385,7 @@ fn main() {
                         "terrarium_voxy_status",
                         "terrarium_voxy_build",
                         "terrarium_voxy_remove",
+                        "terrarium_voxy_cancel",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

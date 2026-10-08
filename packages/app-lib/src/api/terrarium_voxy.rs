@@ -1,4 +1,6 @@
-//! Terrarium: Voxy (далека прорисовка LoD), NeoForge-порт `j-shelfwood/voxy-neoforge`.
+//! Terrarium: Voxy (далека прорисовка LoD), NeoForge-порт `j-shelfwood/voxy-neoforge` — наш форк
+//! `Kemzino/voxy-neoforge`, гілка `terrarium`: портований на Sodium 0.8.13, який стоїть у збірці
+//! (апстрім зібраний під Sodium 0.6 і крашиться на старті).
 //!
 //! Ліцензія Voxy — «All rights reserved, do not redistribute», тож у збірку його не кладемо: кожен гравець
 //! збирає мод у себе з вихідного коду на зафіксованому коміті, і jar іде лише в його власну теку `mods/`.
@@ -19,8 +21,8 @@ use std::sync::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 /// Репозиторій порту і коміт, з якого збираємо.
-pub const REPO: &str = "j-shelfwood/voxy-neoforge";
-pub const COMMIT: &str = "89636aa8261f46c6e31c14f2d9a55a9e40b93f59";
+pub const REPO: &str = "Kemzino/voxy-neoforge";
+pub const COMMIT: &str = "8d0eec4e0c15e518f54bb94ca19c2c837b5fe97a";
 const GAME_VERSION: &str = "1.21.1";
 const JDK_MAJOR: u32 = 21;
 /// Наші jar-и: `voxy-<версія>+<коміт>.jar`
@@ -75,9 +77,53 @@ fn current_progress() -> Option<Progress> {
 struct ProgressGuard;
 impl Drop for ProgressGuard {
     fn drop(&mut self) {
+        if let Ok(mut c) = CANCEL.lock() {
+            *c = None;
+        }
         if let Ok(mut p) = PROGRESS.lock() {
             *p = None;
         }
+    }
+}
+
+/// Скасування поточної збірки: [`cancel`] шле сигнал, [`build_and_install`] чекає на нього поряд зі збіркою.
+static CANCEL: Mutex<Option<tokio::sync::oneshot::Sender<()>>> =
+    Mutex::new(None);
+/// PID запущеного Gradle: при скасуванні вбиваємо все дерево (Gradle форкає свої JVM).
+static GRADLE_PID: Mutex<Option<u32>> = Mutex::new(None);
+
+fn kill_gradle_tree() {
+    let Some(pid) = GRADLE_PID.lock().ok().and_then(|mut p| p.take()) else {
+        return;
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .status();
+    }
+}
+
+/// Скасовує збірку Voxy, якщо вона йде. Повертає, чи було що скасовувати.
+pub fn cancel() -> bool {
+    let sender = CANCEL.lock().ok().and_then(|mut c| c.take());
+    match sender {
+        Some(sender) => {
+            kill_gradle_tree();
+            sender.send(()).is_ok()
+        }
+        None => false,
     }
 }
 
@@ -390,6 +436,9 @@ async fn run_gradle(
         command.creation_flags(CREATE_NO_WINDOW);
     }
     let mut child = command.spawn()?;
+    if let Ok(mut pid) = GRADLE_PID.lock() {
+        *pid = child.id();
+    }
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     for pipe in [
@@ -447,6 +496,9 @@ async fn run_gradle(
         log.push('\n');
     }
     let exit = child.wait().await?;
+    if let Ok(mut pid) = GRADLE_PID.lock() {
+        *pid = None;
+    }
     io::write(log_path, log.as_bytes()).await?;
     if !exit.success() {
         return Err(crate::ErrorKind::LauncherError(format!(
@@ -480,7 +532,32 @@ pub async fn build_and_install(instance_id: &str) -> crate::Result<VoxyStatus> {
         });
     }
     let _guard = ProgressGuard;
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
+    if let Ok(mut c) = CANCEL.lock() {
+        *c = Some(cancel_tx);
+    }
 
+    // Скасування кидає незавершену збірку посеред будь-якого кроку (завантаження, Gradle): її future
+    // дропається, процес Gradle уже вбито в [`cancel`].
+    let result = tokio::select! {
+        result = build_inner(instance_id) => result,
+        Ok(()) = cancel_rx => {
+            if let Ok(work) = work_root().await {
+                let _ = io::remove_dir_all(&work).await;
+            }
+            tracing::info!("Збірку Voxy скасовано");
+            Err(crate::ErrorKind::LauncherError(CANCELLED.to_string()).into())
+        }
+    };
+    drop(_guard);
+    result?;
+    status(instance_id).await
+}
+
+/// Текст помилки скасованої збірки; фронтенд показує його як повідомлення, а не як збій.
+pub const CANCELLED: &str = "Збірку Voxy скасовано";
+
+async fn build_inner(instance_id: &str) -> crate::Result<()> {
     if !status(instance_id).await?.compatible {
         return Err(crate::ErrorKind::InputError(format!(
             "Voxy збирається лише для NeoForge {GAME_VERSION}"
@@ -543,8 +620,7 @@ pub async fn build_and_install(instance_id: &str) -> crate::Result<VoxyStatus> {
         target.display()
     );
 
-    drop(_guard);
-    status(instance_id).await
+    Ok(())
 }
 
 /// Прибирає Voxy з примірника.

@@ -501,3 +501,11 @@ export async function terrarium_voxy_build(instanceId: string) {
 export async function terrarium_voxy_remove(instanceId: string) {
 	return await invoke<VoxyStatus>('plugin:terrarium|terrarium_voxy_remove', { instanceId })
 }
+
+/** Скасовує збірку Voxy, що йде; true — було що скасовувати */
+export async function terrarium_voxy_cancel() {
+	return await invoke<boolean>('plugin:terrarium|terrarium_voxy_cancel')
+}
+
+/** Текст помилки, з якою завершується скасована збірка (див. `terrarium_voxy::CANCELLED`) */
+export const VOXY_CANCELLED = 'Збірку Voxy скасовано'
