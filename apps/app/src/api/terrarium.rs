@@ -11,6 +11,7 @@ use theseus::terrarium_modrinth::{
     self, ModrinthAppInfo, ModrinthImportResult,
 };
 use theseus::terrarium_sync::{self, SyncPreview, SyncRequest, SyncResult};
+use theseus::terrarium_voxy::{self, VoxyStatus};
 
 pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
     tauri::plugin::Builder::new("terrarium")
@@ -53,6 +54,9 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             terrarium_curseforge_prepare_modpack,
             terrarium_graalvm_status,
             terrarium_set_graalvm,
+            terrarium_voxy_status,
+            terrarium_voxy_build,
+            terrarium_voxy_remove,
         ])
         .build()
 }
@@ -457,4 +461,19 @@ pub async fn terrarium_set_graalvm(
     enabled: bool,
 ) -> Result<GraalvmStatus> {
     Ok(terrarium_java::set_enabled(&instance_id, enabled).await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_voxy_status(instance_id: String) -> Result<VoxyStatus> {
+    Ok(terrarium_voxy::status(&instance_id).await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_voxy_build(instance_id: String) -> Result<VoxyStatus> {
+    Ok(terrarium_voxy::build_and_install(&instance_id).await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_voxy_remove(instance_id: String) -> Result<VoxyStatus> {
+    Ok(terrarium_voxy::remove(&instance_id).await?)
 }

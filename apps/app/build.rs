@@ -382,6 +382,9 @@ fn main() {
                         "terrarium_curseforge_prepare_modpack",
                         "terrarium_graalvm_status",
                         "terrarium_set_graalvm",
+                        "terrarium_voxy_status",
+                        "terrarium_voxy_build",
+                        "terrarium_voxy_remove",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

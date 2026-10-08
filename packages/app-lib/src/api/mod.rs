@@ -21,6 +21,7 @@ pub mod terrarium_curseforge;
 pub mod terrarium_java;
 pub mod terrarium_modrinth;
 pub mod terrarium_sync;
+pub mod terrarium_voxy;
 pub mod users;
 pub mod worlds;
 

@@ -75,6 +75,11 @@
 					:instance-id="instance.id"
 					:disabled="playing || loading || isInstalling || instance.quarantined"
 				/>
+				<VoxyBuildButton
+					v-if="!isServerInstance"
+					:instance-id="instance.id"
+					:disabled="playing || loading || isInstalling || instance.quarantined"
+				/>
 				<Button
 					v-if="isInstalling"
 					type="colored"
@@ -212,6 +217,7 @@ import type { GameInstance } from '@/helpers/types'
 
 import InstanceHeaderServerMetadata from './instance-page-header-server-metadata.vue'
 import JavaRuntimeToggle from './JavaRuntimeToggle.vue'
+import VoxyBuildButton from './VoxyBuildButton.vue'
 
 const messages = defineMessages({
 	createShortcut: {

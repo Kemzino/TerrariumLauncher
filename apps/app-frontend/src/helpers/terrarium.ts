@@ -470,3 +470,34 @@ export async function terrarium_set_graalvm(instanceId: string, enabled: boolean
 		enabled,
 	})
 }
+
+// ---------------------------------------------------------------------------
+// Voxy: збирається в гравця з коду (ліцензія не дозволяє поширювати jar)
+
+export interface VoxyStatus {
+	/** Примірник — NeoForge 1.21.1 */
+	compatible: boolean
+	/** Назва встановленого jar Voxy */
+	installed: string | null
+	/** Встановлено з зафіксованого коміту */
+	up_to_date: boolean
+	commit: string
+	repo: string
+	building: boolean
+	stage: string | null
+	/** 0..1 */
+	progress: number
+}
+
+export async function terrarium_voxy_status(instanceId: string) {
+	return await invoke<VoxyStatus>('plugin:terrarium|terrarium_voxy_status', { instanceId })
+}
+
+/** Качає код Voxy, збирає (кілька хвилин) і кладе jar у mods/ примірника. */
+export async function terrarium_voxy_build(instanceId: string) {
+	return await invoke<VoxyStatus>('plugin:terrarium|terrarium_voxy_build', { instanceId })
+}
+
+export async function terrarium_voxy_remove(instanceId: string) {
+	return await invoke<VoxyStatus>('plugin:terrarium|terrarium_voxy_remove', { instanceId })
+}
