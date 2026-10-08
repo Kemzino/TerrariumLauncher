@@ -1350,6 +1350,65 @@ fn read_release_files(path: &Path) -> crate::Result<ReleaseContents> {
     Ok(ReleaseContents { files, core, name })
 }
 
+/// Скільки пам'яті (МіБ) треба збірці для комфортної гри.
+const PACK_MEMORY_MB: u32 = 6 * 1024;
+/// Скільки RAM лишаємо системі та нативній пам'яті гри поза хіпом.
+const SYSTEM_RESERVE_MB: u64 = 3 * 1024;
+/// Маркер у теці примірника: пам'ять збірки вже виставлено, далі — вибір гравця.
+const MEMORY_MARKER: &str = ".terrarium-memory";
+
+/// Один раз на примірник ставимо збірці [`PACK_MEMORY_MB`], якщо гравець сам
+/// нічого не обрав (немає власного значення в примірнику, а глобальне менше).
+/// На слабких ПК — не більше, ніж RAM мінус [`SYSTEM_RESERVE_MB`]. Після
+/// цього маркер, тож зміни гравця наступні оновлення не чіпають.
+async fn apply_pack_memory(
+    instance_id: &str,
+    instance_dir: &Path,
+    state: &State,
+) -> crate::Result<()> {
+    let marker = instance_dir.join(MEMORY_MARKER);
+    if marker.exists() {
+        return Ok(());
+    }
+
+    let context =
+        commands::get_instance_launch_context(instance_id, &state.pool).await?;
+    let has_own = context
+        .as_ref()
+        .is_some_and(|c| c.launch_overrides.memory.is_some());
+    let global = crate::state::Settings::get(&state.pool)
+        .await?
+        .memory
+        .maximum;
+    let cap = crate::api::jre::system_memory_mb()
+        .saturating_sub(SYSTEM_RESERVE_MB)
+        .min(u32::MAX as u64) as u32;
+    let target = PACK_MEMORY_MB.min(cap);
+
+    if !has_own && target > global {
+        crate::api::instance::edit(
+            instance_id,
+            EditInstance {
+                launch_overrides: Some(
+                    commands::InstanceLaunchOverridesPatch {
+                        memory: Some(Some(crate::state::MemorySettings {
+                            maximum: target,
+                        })),
+                        ..Default::default()
+                    },
+                ),
+                ..Default::default()
+            },
+        )
+        .await?;
+        tracing::info!(
+            "Terrarium: пам'ять примірника {instance_id} = {target} МіБ"
+        );
+    }
+    io::write(&marker, b"").await?;
+    Ok(())
+}
+
 /// Після встановлення/оновлення збірки: якщо в пакеті приїхала іконка
 /// (`.terrarium/icon.*`) — ставимо її примірнику й прибираємо службову папку.
 /// Повертає `true`, якщо іконку застосовано.
@@ -1358,6 +1417,8 @@ pub async fn apply_pack_branding(instance_id: String) -> crate::Result<bool> {
     let state = State::get().await?;
     let instance_dir =
         crate::api::instance::get_full_path(&instance_id).await?;
+
+    apply_pack_memory(&instance_id, &instance_dir, &state).await?;
 
     // Групи модів: спершу повертаємо особисті моди туди, де вони були до
     // оновлення (див. prepare_pack_update), потім розкладаємо моди збірки

@@ -395,6 +395,11 @@ fn system_memory_bytes() -> u64 {
     .total_memory()
 }
 
+/// Total system RAM in MiB.
+pub fn system_memory_mb() -> u64 {
+    system_memory_bytes() / (1024 * 1024)
+}
+
 /// Recommended default max heap (MiB) for new instances based on system RAM.
 pub fn default_memory_max_mb() -> u32 {
     const BYTES_PER_GIB: u64 = 1024 * 1024 * 1024;
