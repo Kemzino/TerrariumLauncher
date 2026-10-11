@@ -29,6 +29,8 @@ const FALLBACK_COMMIT: &str = "c0fa6e5ade99aa5bbbf355a838a06a4201e0c99b";
 const LATEST_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 const GAME_VERSION: &str = "1.21.1";
 const JDK_MAJOR: u32 = 21;
+/// Azul ships Windows JDKs as zip, Linux/macOS as tar.gz (unix permissions kept).
+const JDK_ARCHIVE: &str = if cfg!(windows) { "zip" } else { "tar.gz" };
 /// Наші jar-и: `voxy-<версія>+<коміт>.jar`
 const JAR_PREFIX: &str = "voxy-";
 
@@ -298,6 +300,19 @@ async fn extract_zip(archive: &Path, to: &Path) -> crate::Result<()> {
     .await?
 }
 
+/// Linux/macOS JDK: tar.gz keeps the executable bits of `bin/java`, `bin/javac`.
+async fn extract_tar_gz(archive: &Path, to: &Path) -> crate::Result<()> {
+    let archive = archive.to_path_buf();
+    let to = to.to_path_buf();
+    tokio::task::spawn_blocking(move || -> crate::Result<()> {
+        std::fs::create_dir_all(&to)?;
+        let reader = std::fs::File::open(&archive)?;
+        tar::Archive::new(flate2::read::GzDecoder::new(reader)).unpack(&to)?;
+        Ok(())
+    })
+    .await?
+}
+
 /// Тека JDK (JAVA_HOME) усередині розпакованого архіву: там, де лежить `bin/javac`.
 fn find_jdk_home(root: &Path, depth: u32) -> Option<PathBuf> {
     let javac = if cfg!(windows) { "javac.exe" } else { "javac" };
@@ -331,9 +346,10 @@ async fn install_jdk(instance_id: &str) -> crate::Result<PathBuf> {
     }
     set_progress(instance_id, "Пошук JDK", 0.02);
     let url = format!(
-        "https://api.azul.com/metadata/v1/zulu/packages?arch={}&java_version={JDK_MAJOR}&os={}&archive_type=zip&javafx_bundled=false&crac_supported=false&release_status=ga&java_package_type=jdk&latest=true&page_size=1",
+        "https://api.azul.com/metadata/v1/zulu/packages?arch={}&java_version={JDK_MAJOR}&os={}&archive_type={}&javafx_bundled=false&crac_supported=false&release_status=ga&java_package_type=jdk&latest=true&page_size=1",
         std::env::consts::ARCH,
-        std::env::consts::OS
+        std::env::consts::OS,
+        JDK_ARCHIVE
     );
     let packages: Vec<Package> = REQWEST_CLIENT
         .get(&url)
@@ -355,14 +371,18 @@ async fn install_jdk(instance_id: &str) -> crate::Result<PathBuf> {
         io::remove_dir_all(&staging).await?;
     }
     io::create_dir_all(&staging).await?;
-    let archive = staging.join("jdk.zip");
+    let archive = staging.join(format!("jdk.{JDK_ARCHIVE}"));
     download(&package.download_url, &archive, |f| {
         set_progress(instance_id, "Завантаження JDK", 0.02 + 0.18 * f)
     })
     .await?;
     set_progress(instance_id, "Розпакування JDK", 0.2);
     let extracted = staging.join("jdk");
-    extract_zip(&archive, &extracted).await?;
+    if cfg!(windows) {
+        extract_zip(&archive, &extracted).await?;
+    } else {
+        extract_tar_gz(&archive, &extracted).await?;
+    }
     io::remove_file(&archive).await?;
 
     if root.exists() {

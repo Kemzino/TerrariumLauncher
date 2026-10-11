@@ -6,8 +6,9 @@ name: Terrarium Launcher release
 #  2. Запушити тег vX.Y.Z вручну (версія у файлах уже має збігатися з тегом).
 #  3. Run workflow з полем tag = існуючий тег — лише перезібрати/дозбирати реліз (без бампа).
 #
-# Платформи: Windows x64 (NSIS) і macOS universal (Intel + Apple Silicon, .dmg + .app.tar.gz
-# для оновлювача). Обидві збірки йдуть паралельно, реліз створює окрема джоба.
+# Платформи: Windows x64 (NSIS), macOS universal (Intel + Apple Silicon, .dmg + .app.tar.gz
+# для оновлювача) і Linux x64 (AppImage з автооновленням + Flatpak-бандл, перепакований з .deb).
+# Збірки йдуть паралельно, реліз створює окрема джоба.
 #
 # Потрібен секрет TAURI_SIGNING_PRIVATE_KEY — вміст ~/.tauri/terrarium-launcher.key
 # (і TAURI_SIGNING_PRIVATE_KEY_PASSWORD, якщо ключ із паролем). Див. docs-terrarium/RELEASE.md.
@@ -101,6 +102,12 @@ jobs:
             target: universal-apple-darwin
             # раннер — Apple Silicon; для universal потрібен ще Intel-таргет
             rust-target: x86_64-apple-darwin
+          # 22.04: AppImage вимагає glibc не новішу за раннерову — старіша база = ширша сумісність
+          - name: Linux x64
+            os: ubuntu-22.04
+            bundles: appimage,deb
+            target: ''
+            rust-target: ''
     runs-on: ${{ matrix.os }}
     env:
       TAG: ${{ needs.tag.outputs.tag || inputs.tag || github.ref_name }}
@@ -128,6 +135,12 @@ jobs:
             exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf file
 
       - name: Setup Rust (rust-toolchain.toml)
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -244,8 +257,32 @@ jobs:
               cp "$APP_TGZ.sig" "dist-release/Terrarium-Launcher_${VERSION}_macos.app.tar.gz.sig"
               cp "$DMG" "dist-release/Terrarium-Launcher_${VERSION}_universal.dmg"
               ;;
+            Linux)
+              APPIMAGE=$(ls "$BUNDLE"/appimage/*.AppImage)
+              test -f "$APPIMAGE.sig" || { echo "::error::Немає $APPIMAGE.sig — збірка без ключа підпису?"; exit 1; }
+              cp "$APPIMAGE" "dist-release/Terrarium-Launcher_${VERSION}_amd64.AppImage"
+              cp "$APPIMAGE.sig" "dist-release/Terrarium-Launcher_${VERSION}_amd64.AppImage.sig"
+              cp "$(ls "$BUNDLE"/deb/*.deb)" apps/app/flatpak/terrarium-launcher.deb
+              ;;
           esac
           ls -la dist-release
+
+      # Flatpak: перепаковуємо щойно зібраний .deb у рантайм GNOME і робимо однофайловий .flatpak
+      - name: Build Flatpak bundle
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: apps/app/flatpak
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          cp ../icons/icon.png icon.png
+          flatpak-builder --user --install-deps-from=flathub --force-clean --repo=repo build \
+            io.github.kemzino.TerrariumLauncher.yml
+          flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+            repo "$GITHUB_WORKSPACE/dist-release/Terrarium-Launcher_${VERSION}_x86_64.flatpak" \
+            io.github.kemzino.TerrariumLauncher
+          ls -la "$GITHUB_WORKSPACE/dist-release"
 
       - name: Upload assets
         uses: actions/upload-artifact@v4
@@ -297,6 +334,8 @@ jobs:
             echo "### Встановлення"
             echo
             echo "- **Windows**: \`Terrarium-Launcher_${VERSION}_x64-setup.exe\`. Інсталятор без сертифіката Authenticode — SmartScreen може попередити: «Докладніше» → «Виконати в будь-якому разі»."
+            echo "- **Linux (AppImage)**: \`Terrarium-Launcher_${VERSION}_amd64.AppImage\` — \`chmod +x\` і запустити; оновлюється автоматично."
+            echo "- **Linux (Flatpak)**: \`flatpak install --user Terrarium-Launcher_${VERSION}_x86_64.flatpak\` (рантайм GNOME підтягнеться з Flathub). Оновлення — встановити новий файл."
             echo "- **macOS** (Intel і Apple Silicon): \`Terrarium-Launcher_${VERSION}_universal.dmg\`. Застосунок не нотаризований Apple — при першому запуску натисни правою кнопкою → «Відкрити», або в терміналі: \`xattr -cr \"/Applications/Terrarium Launcher.app\"\`."
             echo
             echo "Встановлені лаунчери оновлюються автоматично."
@@ -314,8 +353,10 @@ jobs:
             --rawfile notes dist-release/release-notes.md \
             --rawfile win_sig "dist-release/Terrarium-Launcher_${VERSION}_x64-setup.exe.sig" \
             --rawfile mac_sig "dist-release/Terrarium-Launcher_${VERSION}_macos.app.tar.gz.sig" \
+            --rawfile linux_sig "dist-release/Terrarium-Launcher_${VERSION}_amd64.AppImage.sig" \
             --arg win_url "${BASE}/Terrarium-Launcher_${VERSION}_x64-setup.exe" \
             --arg mac_url "${BASE}/Terrarium-Launcher_${VERSION}_macos.app.tar.gz" \
+            --arg linux_url "${BASE}/Terrarium-Launcher_${VERSION}_amd64.AppImage" \
             '{
               version: $version,
               notes: $notes,
@@ -323,7 +364,8 @@ jobs:
               platforms: {
                 "windows-x86_64": { signature: ($win_sig | rtrimstr("\n")), url: $win_url },
                 "darwin-aarch64": { signature: ($mac_sig | rtrimstr("\n")), url: $mac_url },
-                "darwin-x86_64":  { signature: ($mac_sig | rtrimstr("\n")), url: $mac_url }
+                "darwin-x86_64":  { signature: ($mac_sig | rtrimstr("\n")), url: $mac_url },
+                "linux-x86_64":   { signature: ($linux_sig | rtrimstr("\n")), url: $linux_url }
               }
             }' > dist-release/latest.json
           cat dist-release/latest.json
@@ -342,5 +384,8 @@ jobs:
             "dist-release/Terrarium-Launcher_${VERSION}_universal.dmg" \
             "dist-release/Terrarium-Launcher_${VERSION}_macos.app.tar.gz" \
             "dist-release/Terrarium-Launcher_${VERSION}_macos.app.tar.gz.sig" \
+            "dist-release/Terrarium-Launcher_${VERSION}_amd64.AppImage" \
+            "dist-release/Terrarium-Launcher_${VERSION}_amd64.AppImage.sig" \
+            "dist-release/Terrarium-Launcher_${VERSION}_x86_64.flatpak" \
             dist-release/latest.json
           echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"

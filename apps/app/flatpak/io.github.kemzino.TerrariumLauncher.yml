@@ -1,0 +1,38 @@
+# Flatpak з готового .deb, який збирає tauri (див. .github/workflows/terrarium-release.yml).
+# Рантайм GNOME уже містить webkit2gtk-4.1, тож перезбирати лаунчер усередині flatpak-builder не треба.
+# Оновлення: через `flatpak update` (вбудований оновлювач Tauri працює лише для AppImage).
+app-id: io.github.kemzino.TerrariumLauncher
+runtime: org.gnome.Platform
+runtime-version: '47'
+sdk: org.gnome.Sdk
+command: TerrariumLauncher
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --device=all
+  # імпорт .mrpack / скріншотів / світів з домашньої теки
+  - --filesystem=home
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.kde.StatusNotifierWatcher
+modules:
+  - name: terrarium-launcher
+    buildsystem: simple
+    sources:
+      - type: file
+        path: terrarium-launcher.deb
+      - type: file
+        path: io.github.kemzino.TerrariumLauncher.desktop
+      - type: file
+        path: io.github.kemzino.TerrariumLauncher.metainfo.xml
+      - type: file
+        path: icon.png
+    build-commands:
+      - ar -x terrarium-launcher.deb
+      - tar -xf data.tar.*
+      - install -Dm755 usr/bin/TerrariumLauncher /app/bin/TerrariumLauncher
+      - install -Dm644 io.github.kemzino.TerrariumLauncher.desktop /app/share/applications/io.github.kemzino.TerrariumLauncher.desktop
+      - install -Dm644 io.github.kemzino.TerrariumLauncher.metainfo.xml /app/share/metainfo/io.github.kemzino.TerrariumLauncher.metainfo.xml
+      - install -Dm644 icon.png /app/share/icons/hicolor/512x512/apps/io.github.kemzino.TerrariumLauncher.png
