@@ -149,6 +149,13 @@ jobs:
           target: ${{ matrix.rust-target }}
           cache-key: terrarium-release
 
+      # build.rs app-lib збирає java/ через Gradle 9 — йому треба JVM 17+ (на ubuntu-22.04 за замовчуванням 11)
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
