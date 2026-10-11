@@ -3,9 +3,11 @@
 # Оновлення: через `flatpak update` (вбудований оновлювач Tauri працює лише для AppImage).
 app-id: io.github.kemzino.TerrariumLauncher
 runtime: org.gnome.Platform
-runtime-version: '47'
+runtime-version: '49'
 sdk: org.gnome.Sdk
 command: TerrariumLauncher
+# flatpak-builder з Ubuntu 22.04 не має appstream-compose; метадані ставимо готові
+appstream-compose: false
 finish-args:
   - --share=ipc
   - --share=network
