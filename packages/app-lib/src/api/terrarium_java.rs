@@ -7,7 +7,9 @@
 //! go missing, the launcher's own Java is used (an invalid override is ignored at launch).
 
 use crate::event::emit::{emit_loading, init_loading};
-use crate::state::instances::commands::{EditInstance, InstanceLaunchOverridesPatch};
+use crate::state::instances::commands::{
+    EditInstance, InstanceLaunchOverridesPatch,
+};
 use crate::util::fetch::REQWEST_CLIENT;
 use crate::util::io;
 use crate::{LoadingBarType, State};
@@ -113,7 +115,11 @@ pub async fn install() -> crate::Result<PathBuf> {
         io::remove_dir_all(&staging).await?;
     }
     io::create_dir_all(&staging).await?;
-    let archive = staging.join(if is_zip { "graalvm.zip" } else { "graalvm.tar.gz" });
+    let archive = staging.join(if is_zip {
+        "graalvm.zip"
+    } else {
+        "graalvm.tar.gz"
+    });
 
     // Stream to disk: the archive is ~350 MB
     let response = REQWEST_CLIENT.get(&url).send().await?.error_for_status()?;
@@ -129,7 +135,11 @@ pub async fn install() -> crate::Result<PathBuf> {
         if total > 0 {
             let percent = done as f64 / total as f64 * 85.0;
             if percent - last_percent >= 1.0 {
-                emit_loading(&loading_bar, percent - last_percent, Some("Downloading GraalVM"))?;
+                emit_loading(
+                    &loading_bar,
+                    percent - last_percent,
+                    Some("Downloading GraalVM"),
+                )?;
                 last_percent = percent;
             }
         }
@@ -137,7 +147,11 @@ pub async fn install() -> crate::Result<PathBuf> {
     file.flush().await?;
     drop(file);
 
-    emit_loading(&loading_bar, (85.0 - last_percent).max(0.0), Some("Extracting GraalVM"))?;
+    emit_loading(
+        &loading_bar,
+        (85.0 - last_percent).max(0.0),
+        Some("Extracting GraalVM"),
+    )?;
     let extract_to = staging.join("jdk");
     let archive_path = archive.clone();
     let extract_dir = extract_to.clone();
@@ -146,10 +160,14 @@ pub async fn install() -> crate::Result<PathBuf> {
         let reader = std::fs::File::open(&archive_path)?;
         if is_zip {
             let mut zip = zip::ZipArchive::new(reader).map_err(|e| {
-                crate::ErrorKind::InputError(format!("Failed to read GraalVM zip: {e}"))
+                crate::ErrorKind::InputError(format!(
+                    "Failed to read GraalVM zip: {e}"
+                ))
             })?;
             zip.extract(&extract_dir).map_err(|e| {
-                crate::ErrorKind::InputError(format!("Failed to extract GraalVM: {e}"))
+                crate::ErrorKind::InputError(format!(
+                    "Failed to extract GraalVM: {e}"
+                ))
             })?;
         } else {
             let gz = flate2::read::GzDecoder::new(reader);
@@ -166,7 +184,9 @@ pub async fn install() -> crate::Result<PathBuf> {
     })
     .await?
     .ok_or_else(|| {
-        crate::ErrorKind::LauncherError("GraalVM archive has no java binary".to_string())
+        crate::ErrorKind::LauncherError(
+            "GraalVM archive has no java binary".to_string(),
+        )
     })?;
     // Validate before making it visible
     crate::api::jre::check_jre(java.clone()).await?;
@@ -179,7 +199,8 @@ pub async fn install() -> crate::Result<PathBuf> {
     emit_loading(&loading_bar, 15.0, Some("GraalVM ready"))?;
 
     installed_path().await?.ok_or_else(|| {
-        crate::ErrorKind::LauncherError("GraalVM install vanished".to_string()).into()
+        crate::ErrorKind::LauncherError("GraalVM install vanished".to_string())
+            .into()
     })
 }
 
@@ -187,13 +208,18 @@ pub async fn status(instance_id: &str) -> crate::Result<GraalvmStatus> {
     let state = State::get().await?;
     let installed = installed_path().await?;
     let context =
-        crate::state::instances::commands::get_instance_launch_context(instance_id, &state.pool)
-            .await?;
+        crate::state::instances::commands::get_instance_launch_context(
+            instance_id,
+            &state.pool,
+        )
+        .await?;
     let current = context.and_then(|c| c.launch_overrides.java_path);
     let enabled = match (&installed, &current) {
         (Some(graal), Some(current)) => Path::new(current) == graal.as_path(),
         // An override pointing at some other GraalVM (set by hand) still counts as on
-        (None, Some(current)) => current.to_ascii_lowercase().contains("graalvm"),
+        (None, Some(current)) => {
+            current.to_ascii_lowercase().contains("graalvm")
+        }
         _ => false,
     };
     Ok(GraalvmStatus {
@@ -205,7 +231,10 @@ pub async fn status(instance_id: &str) -> crate::Result<GraalvmStatus> {
 }
 
 /// Switches the instance to GraalVM (downloading it first if needed) or back to the launcher's Java.
-pub async fn set_enabled(instance_id: &str, enabled: bool) -> crate::Result<GraalvmStatus> {
+pub async fn set_enabled(
+    instance_id: &str,
+    enabled: bool,
+) -> crate::Result<GraalvmStatus> {
     let java_path = if enabled {
         Some(install().await?.to_string_lossy().to_string())
     } else {

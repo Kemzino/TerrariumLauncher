@@ -1278,7 +1278,10 @@ async fn remove_existing_imported_pack_content(
             if let Some(parent) = parked.parent() {
                 crate::util::io::create_dir_all(parent).await?;
             }
-            if crate::util::io::rename_or_move(&current, &parked).await.is_err() {
+            if crate::util::io::rename_or_move(&current, &parked)
+                .await
+                .is_err()
+            {
                 crate::util::io::remove_file(&current).await?;
             }
         }

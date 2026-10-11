@@ -546,7 +546,9 @@ pub(crate) async fn set_mod_group(
     }
     .await;
     if let Err(err) = renamed {
-        let _ = io::rename_or_move(base.join(&new_path), base.join(project_path)).await;
+        let _ =
+            io::rename_or_move(base.join(&new_path), base.join(project_path))
+                .await;
         return Err(err);
     }
     ensure_readme(&mods_dir).await?;

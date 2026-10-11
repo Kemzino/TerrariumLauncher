@@ -425,14 +425,16 @@ pub(crate) async fn upsert_imported_instance<'a, E>(
 where
     E: sqlx::Executor<'a, Database = sqlx::Sqlite> + Copy,
 {
-    let ts = |secs: i64| DateTime::from_timestamp(secs, 0).unwrap_or_else(Utc::now);
-    let linked_data = match (input.modrinth_project_id, input.modrinth_version_id) {
-        (Some(project_id), Some(version_id)) => Some(LegacyLinkedData {
-            project_id: Some(project_id),
-            version_id: Some(version_id),
-        }),
-        _ => None,
-    };
+    let ts =
+        |secs: i64| DateTime::from_timestamp(secs, 0).unwrap_or_else(Utc::now);
+    let linked_data =
+        match (input.modrinth_project_id, input.modrinth_version_id) {
+            (Some(project_id), Some(version_id)) => Some(LegacyLinkedData {
+                project_id: Some(project_id),
+                version_id: Some(version_id),
+            }),
+            _ => None,
+        };
     upsert_legacy_instance(
         exec,
         LegacyInstanceUpsert {

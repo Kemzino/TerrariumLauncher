@@ -6,6 +6,7 @@ use crate::event::emit::{emit_loading, init_loading};
 use crate::pack::install_from::{
     EnvType, PackDependency, PackFile, PackFileHash, PackFormat,
 };
+use crate::state::instances::commands::{flat_path, group_of};
 use crate::state::{
     CacheBehaviour, CachedEntry, InstanceMetadata, ModLoader, SideType, State,
     VersionEnvironment,
@@ -14,7 +15,6 @@ use crate::util::io::{self, IOError};
 use futures::{StreamExt, stream};
 use path_util::SafeRelativeUtf8UnixPathBuf;
 use serde::Serialize;
-use crate::state::instances::commands::{flat_path, group_of};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Read, Seek, Write};
 use std::path::PathBuf;
@@ -272,7 +272,9 @@ pub async fn export_mrpack(
                 relative_path
             } else {
                 flat.try_into().map_err(|_| {
-                    crate::ErrorKind::OtherError("Invalid flattened path".into())
+                    crate::ErrorKind::OtherError(
+                        "Invalid flattened path".into(),
+                    )
                 })?
             };
             override_files.push((path, relative_path, size));
@@ -348,7 +350,9 @@ where
     let mut buffer = vec![0_u8; EXPORT_COPY_BUFFER_SIZE];
 
     for (name, bytes) in extra_entries {
-        writer.start_file(name, options).map_err(std::io::Error::from)?;
+        writer
+            .start_file(name, options)
+            .map_err(std::io::Error::from)?;
         writer.write_all(&bytes)?;
     }
 
