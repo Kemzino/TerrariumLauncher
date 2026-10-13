@@ -237,3 +237,11 @@ textarea {
 		opacity: 0.6;
 	}
 }
+
+// Вікно неактивне або йде гра — CSS-анімації стоять, щоб WebView не малював щокадру
+// (див. composables/use-idle-animations.ts)
+.terrarium-idle *,
+.terrarium-idle *::before,
+.terrarium-idle *::after {
+	animation-play-state: paused !important;
+}

@@ -77,6 +77,7 @@ import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
 import { useAppEvent } from '@/composables/use-app-event'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { useError } from '@/composables/use-error.js'
+import { useIdleAnimations } from '@/composables/use-idle-animations'
 import { useInstanceMetadataRefresh } from '@/composables/use-instance-metadata-refresh'
 import { useQuickInstanceLimit } from '@/composables/use-quick-instance-limit.ts'
 import { isDarkTheme, useTheme } from '@/composables/use-theme.ts'
@@ -176,6 +177,7 @@ const router = useRouter()
 const route = useRoute()
 const { channel: appEventChannel, events: appEvents } = setupAppEventsProvider()
 useInstanceMetadataRefresh(appEvents)
+useIdleAnimations(appEvents)
 const breadcrumbManager = createBreadcrumbManager()
 provideBreadcrumbManager(breadcrumbManager)
 const canNavigateBack = ref(false)
