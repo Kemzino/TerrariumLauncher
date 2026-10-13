@@ -672,6 +672,10 @@ pub struct PublishPreview {
     pub candidates: Vec<PublishCandidate>,
     /// Були в релізі, але в примірнику їх уже немає — випадуть зі збірки.
     pub removed_from_instance: Vec<String>,
+    /// Моди релізу з Modrinth: шлях у пакеті → id проєкту (з посилання на
+    /// завантаження). Щоб у списку змін бачити «оновлено», а не «прибрано + додано».
+    #[serde(default)]
+    pub release_projects: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1098,6 +1102,7 @@ pub async fn publish_preview(
     let mut release_core = None;
     let mut release_name = None;
     let mut release_files = HashMap::<String, Option<String>>::new();
+    let mut release_projects = HashMap::<String, String>::new();
     let mut release_prerelease = false;
     // База порівняння — найновіший реліз з обох каналів (тестовий, якщо він
     // свіжіший за стабільний і ще не поширений)
@@ -1122,6 +1127,7 @@ pub async fn publish_preview(
             tokio::task::spawn_blocking(move || read_release_files(&path))
                 .await??;
         release_files = contents.files;
+        release_projects = contents.projects;
         release_core = contents.core;
         release_name = contents.name;
     }
@@ -1247,6 +1253,7 @@ pub async fn publish_preview(
         icon_changed,
         candidates,
         removed_from_instance,
+        release_projects,
     })
 }
 
@@ -1271,6 +1278,8 @@ fn zip_error(error: zip::result::ZipError) -> crate::Error {
 
 struct ReleaseContents {
     files: HashMap<String, Option<String>>,
+    /// Шлях у пакеті → id проєкту Modrinth.
+    projects: HashMap<String, String>,
     core: Option<PackCore>,
     name: Option<String>,
 }
@@ -1291,6 +1300,8 @@ fn read_release_files(path: &Path) -> crate::Result<ReleaseContents> {
     #[derive(Deserialize)]
     struct IndexFile {
         path: String,
+        #[serde(default)]
+        downloads: Vec<String>,
     }
 
     let file = std::fs::File::open(path)?;
@@ -1324,12 +1335,22 @@ fn read_release_files(path: &Path) -> crate::Result<ReleaseContents> {
     }
     let mut core = None;
     let mut name = None;
+    let mut projects = HashMap::new();
     if let Ok(mut entry) = archive.by_name("modrinth.index.json") {
         let mut raw = String::new();
         entry.read_to_string(&mut raw)?;
         let index: Index = serde_json::from_str(&raw)?;
         name = index.name.clone();
         for f in index.files {
+            // https://cdn.modrinth.com/data/<project>/versions/<version>/<file>
+            if let Some(project) = f.downloads.iter().find_map(|url| {
+                url.strip_prefix("https://cdn.modrinth.com/data/")?
+                    .split('/')
+                    .next()
+                    .map(str::to_string)
+            }) {
+                projects.insert(f.path.clone(), project);
+            }
             files.entry(f.path).or_insert(None);
         }
         let deps = &index.dependencies;
@@ -1347,7 +1368,12 @@ fn read_release_files(path: &Path) -> crate::Result<ReleaseContents> {
             loader_version: loader.and_then(|k| deps.get(k).cloned()),
         });
     }
-    Ok(ReleaseContents { files, core, name })
+    Ok(ReleaseContents {
+        files,
+        projects,
+        core,
+        name,
+    })
 }
 
 /// Скільки пам'яті (МіБ) треба збірці для комфортної гри.

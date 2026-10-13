@@ -21,10 +21,12 @@ import {
 	Textarea,
 	useVIntl,
 } from '@modrinth/ui'
+import { renderString } from '@modrinth/utils'
 import { useQuery } from '@tanstack/vue-query'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
+import { get_project_many } from '@/helpers/cache.js'
 import {
 	type PackKind,
 	type PublishCandidate,
@@ -34,6 +36,7 @@ import {
 	terrarium_publish_preview,
 	terrarium_publish_release,
 } from '@/helpers/terrarium'
+import { buildChangelog, removedProjectIds } from '@/helpers/terrarium-changelog'
 import { instanceContentQueryOptions } from '@/pages/instance/query-options'
 
 const { formatMessage } = useVIntl()
@@ -134,9 +137,20 @@ const messages = defineMessages({
 		id: 'terrarium.publish.folder-defaultconfigs',
 		defaultMessage: 'Стандартні конфіги світів',
 	},
-	folderResourcepacks: { id: 'terrarium.publish.folder-resourcepacks', defaultMessage: 'Ресурспаки' },
+	folderResourcepacks: {
+		id: 'terrarium.publish.folder-resourcepacks',
+		defaultMessage: 'Ресурспаки',
+	},
 	folderShaderpacks: { id: 'terrarium.publish.folder-shaderpacks', defaultMessage: 'Шейдери' },
 	folderDatapacks: { id: 'terrarium.publish.folder-datapacks', defaultMessage: 'Датапаки' },
+	autoNotes: {
+		id: 'terrarium.publish.auto-notes',
+		defaultMessage: 'Додати автоматичний список змін',
+	},
+	autoNotesHint: {
+		id: 'terrarium.publish.auto-notes-hint',
+		defaultMessage: 'Йде після твого тексту; оновлюється, коли міняєш галочки нижче.',
+	},
 })
 
 const folderLabels: Record<string, keyof typeof messages> = {
@@ -172,12 +186,16 @@ const contentQuery = useQuery(
 	})),
 )
 const modInfo = computed(() => {
-	const map = new Map<string, { title: string; icon?: string; version?: string }>()
+	const map = new Map<
+		string,
+		{ title: string; icon?: string; version?: string; projectId?: string }
+	>()
 	for (const item of contentQuery.data.value?.contentItems ?? []) {
 		map.set(item.file_name, {
 			title: item.project?.title ?? item.file_name,
 			icon: item.project?.icon_url ?? undefined,
 			version: item.version?.version_number,
+			projectId: item.project?.id ?? undefined,
 		})
 	}
 	return map
@@ -197,6 +215,38 @@ function subtitleFor(c: PublishCandidate) {
 
 const iconUrl = ref<string | null>(null)
 
+// Автоматичний список змін (додано / оновлено / прибрано) — додається до опису
+const autoNotes = ref(true)
+const projectTitles = ref(new Map<string, string>())
+watch(
+	() => (preview.value ? removedProjectIds(preview.value, selected.value) : []),
+	async (ids) => {
+		const missing = ids.filter((id) => !projectTitles.value.has(id))
+		if (!missing.length) return
+		try {
+			const projects = (await get_project_many(missing, 'must_revalidate')) as {
+				id: string
+				title: string
+			}[]
+			const next = new Map(projectTitles.value)
+			for (const p of projects ?? []) next.set(p.id, p.title)
+			projectTitles.value = next
+		} catch {
+			// Без мережі — лишаються назви з імен файлів
+		}
+	},
+)
+const changelog = computed(() =>
+	preview.value
+		? buildChangelog({
+				preview: preview.value,
+				selected: selected.value,
+				localMods: modInfo.value,
+				projectTitles: projectTitles.value,
+			})
+		: '',
+)
+
 async function show(
 	targetPack: PackKind,
 	targetInstanceId: string,
@@ -210,6 +260,7 @@ async function show(
 	tag.value = suggestNextTag(currentTag)
 	name.value = `Terrarium ${targetPack === 'server' ? 'Server ' : ''}${tag.value}`
 	notes.value = ''
+	autoNotes.value = true
 	preview.value = null
 	selected.value = {}
 	expandedUnchanged.value = {}
@@ -368,7 +419,9 @@ async function publish() {
 			instance_id: instanceId.value,
 			tag: tag.value.trim(),
 			name: name.value.trim() || tag.value.trim(),
-			body: notes.value.trim() || null,
+			body:
+				[notes.value.trim(), autoNotes.value ? changelog.value : ''].filter(Boolean).join('\n\n') ||
+				null,
 			prerelease: toTest.value,
 			excluded,
 		})
@@ -394,7 +447,9 @@ defineExpose({ show })
 <template>
 	<NewModal
 		ref="modal"
-		:header="pack === 'server' ? formatMessage(messages.headerServer) : formatMessage(messages.header)"
+		:header="
+			pack === 'server' ? formatMessage(messages.headerServer) : formatMessage(messages.header)
+		"
 		scrollable
 		width="48rem"
 		max-width="calc(100vw - 2rem)"
@@ -465,6 +520,14 @@ defineExpose({ show })
 					:placeholder="formatMessage(messages.notesPlaceholder)"
 					wrapper-class="w-full"
 				/>
+				<template v-if="changelog">
+					<Checkbox v-model="autoNotes" :label="formatMessage(messages.autoNotes)" />
+					<template v-if="autoNotes">
+						<p class="m-0 text-sm text-secondary">{{ formatMessage(messages.autoNotesHint) }}</p>
+						<!-- eslint-disable-next-line vue/no-v-html -->
+						<div class="publish-auto markdown-body text-sm" v-html="renderString(changelog)" />
+					</template>
+				</template>
 			</div>
 
 			<div v-if="loading" class="flex items-center gap-2 text-secondary">
@@ -482,10 +545,18 @@ defineExpose({ show })
 					{{ formatMessage(messages.baseIsTest, { tag: preview.release_tag }) }}
 				</p>
 
-				<section class="publish-group publish-brand" :class="{ 'publish-group--attention': brandChanged }">
+				<section
+					class="publish-group publish-brand"
+					:class="{ 'publish-group--attention': brandChanged }"
+				>
 					<header class="publish-group__head">
 						<div class="publish-brand__row">
-							<Avatar :src="iconUrl" size="3rem" pad-transparent-corners class="publish-brand__icon" />
+							<Avatar
+								:src="iconUrl"
+								size="3rem"
+								pad-transparent-corners
+								class="publish-brand__icon"
+							/>
 							<div>
 								<h3 class="publish-group__title">
 									{{ formatMessage(messages.brandTitle) }}
@@ -498,7 +569,12 @@ defineExpose({ show })
 								</h3>
 								<p class="publish-core__value">{{ preview.name }}</p>
 								<p v-if="nameChanged" class="publish-group__hint">
-									{{ formatMessage(messages.brandWas, { tag: preview.release_tag, name: preview.release_name }) }}
+									{{
+										formatMessage(messages.brandWas, {
+											tag: preview.release_tag,
+											name: preview.release_name,
+										})
+									}}
 								</p>
 								<p v-if="brandChanged" class="publish-group__hint">
 									{{ formatMessage(messages.brandHint) }}
@@ -511,7 +587,10 @@ defineExpose({ show })
 					</header>
 				</section>
 
-				<section class="publish-group publish-core" :class="{ 'publish-group--attention': coreChanged }">
+				<section
+					class="publish-group publish-core"
+					:class="{ 'publish-group--attention': coreChanged }"
+				>
 					<header class="publish-group__head">
 						<div>
 							<h3 class="publish-group__title">
@@ -548,7 +627,9 @@ defineExpose({ show })
 					<header class="publish-group__head">
 						<h3 class="publish-group__title">
 							{{ g.label }}
-							<span v-if="g.attention.length" class="publish-group__count">{{ g.attention.length }}</span>
+							<span v-if="g.attention.length" class="publish-group__count">{{
+								g.attention.length
+							}}</span>
 						</h3>
 						<div v-if="g.attention.length > 1" class="publish-group__bulk">
 							<button type="button" @click="setGroup(g.attention, true)">
@@ -573,13 +654,23 @@ defineExpose({ show })
 								@click.stop
 								@update:model-value="selected[c.path] = $event"
 							/>
-							<Avatar v-if="infoFor(c)" :src="infoFor(c)?.icon" size="2rem" class="publish-item__icon" />
+							<Avatar
+								v-if="infoFor(c)"
+								:src="infoFor(c)?.icon"
+								size="2rem"
+								class="publish-item__icon"
+							/>
 							<FileIcon v-else class="publish-item__file" />
 							<span class="publish-item__text">
-								<span class="publish-item__name" :title="c.path">{{ infoFor(c)?.title ?? relPath(c) }}</span>
+								<span class="publish-item__name" :title="c.path">{{
+									infoFor(c)?.title ?? relPath(c)
+								}}</span>
 								<span v-if="infoFor(c)" class="publish-item__sub">{{ subtitleFor(c) }}</span>
 							</span>
-							<span class="publish-item__tag" :class="c.in_release && preview.release_tag ? 'is-changed' : 'is-new'">
+							<span
+								class="publish-item__tag"
+								:class="c.in_release && preview.release_tag ? 'is-changed' : 'is-new'"
+							>
 								{{
 									c.in_release && preview.release_tag
 										? formatMessage(messages.kindChanged)
@@ -592,7 +683,10 @@ defineExpose({ show })
 
 					<div v-if="g.unchanged.length" class="publish-group__unchanged">
 						<span>{{ formatMessage(messages.unchangedLine, { count: g.unchanged.length }) }}</span>
-						<button type="button" @click="expandedUnchanged[g.folder] = !expandedUnchanged[g.folder]">
+						<button
+							type="button"
+							@click="expandedUnchanged[g.folder] = !expandedUnchanged[g.folder]"
+						>
 							{{
 								expandedUnchanged[g.folder]
 									? formatMessage(messages.hideUnchanged)
@@ -613,10 +707,17 @@ defineExpose({ show })
 								@click.stop
 								@update:model-value="selected[c.path] = $event"
 							/>
-							<Avatar v-if="infoFor(c)" :src="infoFor(c)?.icon" size="2rem" class="publish-item__icon" />
+							<Avatar
+								v-if="infoFor(c)"
+								:src="infoFor(c)?.icon"
+								size="2rem"
+								class="publish-item__icon"
+							/>
 							<FileIcon v-else class="publish-item__file" />
 							<span class="publish-item__text">
-								<span class="publish-item__name" :title="c.path">{{ infoFor(c)?.title ?? relPath(c) }}</span>
+								<span class="publish-item__name" :title="c.path">{{
+									infoFor(c)?.title ?? relPath(c)
+								}}</span>
 								<span v-if="infoFor(c)" class="publish-item__sub">{{ subtitleFor(c) }}</span>
 							</span>
 							<span class="publish-item__meta">{{ formatSize(c.size) }}</span>
@@ -635,10 +736,17 @@ defineExpose({ show })
 								@click.stop
 								@update:model-value="selected[c.path] = $event"
 							/>
-							<Avatar v-if="infoFor(c)" :src="infoFor(c)?.icon" size="2rem" class="publish-item__icon" />
+							<Avatar
+								v-if="infoFor(c)"
+								:src="infoFor(c)?.icon"
+								size="2rem"
+								class="publish-item__icon"
+							/>
 							<FileIcon v-else class="publish-item__file" />
 							<span class="publish-item__text">
-								<span class="publish-item__name" :title="c.path">{{ infoFor(c)?.title ?? relPath(c) }}</span>
+								<span class="publish-item__name" :title="c.path">{{
+									infoFor(c)?.title ?? relPath(c)
+								}}</span>
 								<span v-if="infoFor(c)" class="publish-item__sub">{{ subtitleFor(c) }}</span>
 							</span>
 							<span class="publish-item__tag is-excluded">
@@ -653,7 +761,10 @@ defineExpose({ show })
 					</div>
 				</section>
 
-				<section v-if="preview.removed_from_instance.length" class="publish-group publish-group--removed">
+				<section
+					v-if="preview.removed_from_instance.length"
+					class="publish-group publish-group--removed"
+				>
 					<header class="publish-group__head">
 						<h3 class="publish-group__title">{{ formatMessage(messages.removedTitle) }}</h3>
 					</header>
@@ -695,6 +806,14 @@ defineExpose({ show })
 </template>
 
 <style scoped lang="scss">
+.publish-auto {
+	max-height: 16rem;
+	overflow-y: auto;
+	padding: 0.5rem 0.75rem;
+	border-radius: var(--radius-md);
+	background: var(--color-button-bg);
+}
+
 .publish-target {
 	display: grid;
 	grid-template-columns: 1fr 1fr;

@@ -234,6 +234,8 @@ export interface PublishPreview {
 	icon_changed: boolean
 	candidates: PublishCandidate[]
 	removed_from_instance: string[]
+	/** Моди релізу з Modrinth: шлях у пакеті → id проєкту */
+	release_projects: Record<string, string>
 }
 
 export interface PublishedRelease {
