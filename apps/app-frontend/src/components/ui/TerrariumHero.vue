@@ -22,7 +22,7 @@ import {
 } from '@modrinth/assets'
 import { Button, defineMessages, injectNotificationManager, useVIntl } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import terrariumLogo from '@/assets/terrarium/logo.gif'
@@ -321,6 +321,37 @@ async function refreshRelease() {
 	}
 }
 
+// Поки лаунчер відкритий, новий реліз може вийти будь-коли. Без повторної перевірки
+// гравець бачив «Грати» до перезапуску лаунчера, хоча оновлення вже є. Перевіряємо тихо,
+// без «Перевіряю оновлення…»; помилка мережі старий результат не стирає.
+const RELEASE_RECHECK_MS = 5 * 60 * 1000
+let lastReleaseCheck = Date.now()
+async function recheckRelease() {
+	if (checking.value || busy.value) return
+	lastReleaseCheck = Date.now()
+	const pack = activePack.value
+	const channel = activeChannel.value
+	try {
+		const latest = await terrarium_fetch_latest_release(pack, channel)
+		// Поки йшов запит, гравець міг перемкнути збірку чи канал — тоді результат уже не наш
+		if (pack !== activePack.value || channel !== activeChannel.value || checking.value) return
+		release.value = latest
+		releaseError.value = null
+	} catch {
+		// Мережа впала — лишаємо те, що вже показуємо
+	}
+}
+const releaseRecheckTimer = setInterval(() => void recheckRelease(), RELEASE_RECHECK_MS)
+// Повернулись у лаунчер — перевіряємо одразу, але не частіше, ніж раз на хвилину
+function onWindowFocus() {
+	if (Date.now() - lastReleaseCheck > 60 * 1000) void recheckRelease()
+}
+window.addEventListener('focus', onWindowFocus)
+onBeforeUnmount(() => {
+	clearInterval(releaseRecheckTimer)
+	window.removeEventListener('focus', onWindowFocus)
+})
+
 async function refresh() {
 	await reloadState()
 	// Гравець без ключа не має бачити серверну збірку чи тестовий канал,
@@ -382,7 +413,11 @@ async function checkProcess() {
 useAppEvent('process', (e) => {
 	if (e.instance_id !== instance.value?.id) return
 	if (e.event === 'launched') playing.value = true
-	if (e.event === 'finished') playing.value = false
+	if (e.event === 'finished') {
+		playing.value = false
+		// Гравець вийшов з гри — найкращий момент показати оновлення, що вийшло, поки грав
+		void recheckRelease()
+	}
 })
 
 async function downloadLatest() {
