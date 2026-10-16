@@ -191,6 +191,11 @@ pub enum ErrorKind {
     #[error("An online profile for {user_name} is not available")]
     OnlineMinecraftProfileUnavailable { user_name: String },
 
+    #[error(
+        "\"{0}\" is an offline account: skins can only be changed on a Microsoft account"
+    )]
+    OfflineAccountSkinError(String),
+
     #[error("Invalid data URL: {0}")]
     InvalidDataUrl(#[from] DataUrlError),
 

@@ -522,6 +522,21 @@ pub async fn get_available_skins() -> crate::Result<Vec<Skin>> {
     Ok(available_skins)
 }
 
+/// Credentials of the selected account, for operations that change its skin on Mojang's side.
+/// Offline accounts have no Mojang profile, so they cannot have their skin changed.
+async fn skin_changing_credentials(state: &State) -> crate::Result<Credentials> {
+    let selected_credentials = Credentials::get_default_credential(&state.pool)
+        .await?
+        .ok_or(ErrorKind::NoCredentialsError)?;
+    if selected_credentials.offline {
+        return Err(ErrorKind::OfflineAccountSkinError(
+            selected_credentials.offline_profile.name,
+        )
+        .into());
+    }
+    Ok(selected_credentials)
+}
+
 /// Adds or updates a skin in the app database and equips it for the current profile.
 /// Bundled default skins are only persisted when they have an associated cape.
 #[tracing::instrument(skip(texture_blob))]
@@ -536,9 +551,7 @@ pub async fn add_and_equip_custom_skin(
     }
 
     let state = State::get().await?;
-    let selected_credentials = Credentials::get_default_credential(&state.pool)
-        .await?
-        .ok_or(ErrorKind::NoCredentialsError)?;
+    let selected_credentials = skin_changing_credentials(&state).await?;
     let cape_id = cape.map(|cape| cape.id);
     let local_texture_key = local_skin_texture_key(&texture_blob);
 
@@ -693,9 +706,7 @@ async fn add_and_equip_custom_skin_now(
 #[tracing::instrument]
 pub async fn equip_skin(skin: Skin) -> crate::Result<()> {
     let state = State::get().await?;
-    let selected_credentials = Credentials::get_default_credential(&state.pool)
-        .await?
-        .ok_or(ErrorKind::NoCredentialsError)?;
+    let selected_credentials = skin_changing_credentials(&state).await?;
 
     set_pending_skin_change(PendingSkinChange::Equip {
         selected_credentials,
@@ -977,9 +988,7 @@ pub async fn save_custom_skin(
 #[tracing::instrument]
 pub async fn unequip_skin() -> crate::Result<()> {
     let state = State::get().await?;
-    let selected_credentials = Credentials::get_default_credential(&state.pool)
-        .await?
-        .ok_or(ErrorKind::NoCredentialsError)?;
+    let selected_credentials = skin_changing_credentials(&state).await?;
 
     set_pending_skin_change(PendingSkinChange::Unequip {
         selected_credentials,

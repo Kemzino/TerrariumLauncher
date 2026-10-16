@@ -3065,6 +3065,12 @@
   "app.skins.modal.upload-skin-first-tooltip": {
     "message": "Upload a skin first!"
   },
+  "app.skins.offline-account.description": {
+    "message": "Sign in with a Microsoft account to choose and apply skins."
+  },
+  "app.skins.offline-account.title": {
+    "message": "Skins are unavailable for offline accounts"
+  },
   "app.skins.preview.edit-button": {
     "message": "Edit skin"
   },

@@ -196,6 +196,14 @@ const messages = defineMessages({
 		id: 'app.skins.demo.description',
 		defaultMessage: 'Sign in to your Minecraft account to save and apply skins!',
 	},
+	offlineAccountTitle: {
+		id: 'app.skins.offline-account.title',
+		defaultMessage: 'Skins are unavailable for offline accounts',
+	},
+	offlineAccountDescription: {
+		id: 'app.skins.offline-account.description',
+		defaultMessage: 'Sign in with a Microsoft account to choose and apply skins.',
+	},
 	signInButton: {
 		id: 'app.skins.sign-in.button',
 		defaultMessage: 'Sign in to Microsoft',
@@ -335,10 +343,14 @@ const skinTexture = computedAsync(async () => {
 const capeTexture = computed(() => currentCape.value?.texture)
 const skinVariant = computed(() => selectedSkin.value?.variant)
 const skinNametag = computed(() => (appSettings.hideNametagSkinsPage ? undefined : username.value))
+// Офлайн-акаунт не має профілю Mojang — скін йому не поставити, тож і вибирати нема чого
+const isOfflineAccount = computed(() => !!currentUser.value?.offline)
 const isSkinManagementReadOnly = computed(
 	() =>
 		!!currentUser.value &&
-		(offline.value || (authServerQuery.isError.value && !authServerQuery.isLoading.value)),
+		(isOfflineAccount.value ||
+			offline.value ||
+			(authServerQuery.isError.value && !authServerQuery.isLoading.value)),
 )
 const hasPendingSkinChange = computed(
 	() => !skinsMatch(selectedSkin.value, originalSelectedSkin.value),
@@ -1268,7 +1280,7 @@ await loadSkins()
 		</div>
 	</div>
 
-	<div v-if="!currentUser" class="sticky w-full bottom-0 z-20 p-4 pt-0">
+	<div v-if="!currentUser || isOfflineAccount" class="sticky w-full bottom-0 z-20 p-4 pt-0">
 		<div
 			class="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 rounded-[20px] border border-solid border-surface-5 bg-surface-3 p-4"
 		>
@@ -1276,10 +1288,16 @@ await loadSkins()
 				<InfoIcon class="size-6 shrink-0 text-blue" />
 				<div class="flex min-w-0 flex-col gap-1">
 					<p class="m-0 text-lg font-semibold leading-6 text-contrast">
-						{{ formatMessage(messages.demoTitle) }}
+						{{
+							formatMessage(isOfflineAccount ? messages.offlineAccountTitle : messages.demoTitle)
+						}}
 					</p>
 					<p class="m-0 text-base leading-6 text-primary">
-						{{ formatMessage(messages.demoDescription) }}
+						{{
+							formatMessage(
+								isOfflineAccount ? messages.offlineAccountDescription : messages.demoDescription,
+							)
+						}}
 					</p>
 				</div>
 			</div>
