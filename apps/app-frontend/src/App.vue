@@ -1747,7 +1747,8 @@ function showDelayedUpdatePopup() {
 }
 
 async function checkUpdates() {
-	if (!(await areUpdatesEnabled())) {
+	// Збій запиту не має вимикати оновлення назавжди: тоді перевірка нижче сама впаде й повториться
+	if (!(await areUpdatesEnabled().catch(() => true))) {
 		console.log('Skipping update check as updates are disabled in this build or environment')
 		updatesEnabled.value = false
 
@@ -1794,13 +1795,20 @@ async function checkUpdates() {
 		getUpdateSize(update.rid).then((size) => (updateSize.value = size))
 	}
 
-	await performCheck()
-	setTimeout(
-		() => {
-			checkUpdates()
-		},
-		5 /* min */ * 60 /* sec */ * 1000 /* ms */,
-	)
+	// Наступна перевірка планується завжди: раніше один збій мережі кидав виняток повз
+	// setTimeout, і лаунчер, відкритий кілька днів, більше ніколи не бачив оновлень
+	try {
+		await performCheck()
+	} catch (e) {
+		console.error('Failed to check for updates:', e)
+	} finally {
+		setTimeout(
+			() => {
+				checkUpdates()
+			},
+			5 /* min */ * 60 /* sec */ * 1000 /* ms */,
+		)
+	}
 }
 
 async function checkLinuxUpdates() {
