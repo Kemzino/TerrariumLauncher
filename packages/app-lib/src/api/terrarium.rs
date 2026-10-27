@@ -232,6 +232,10 @@ struct GithubRelease {
     body: Option<String>,
     published_at: Option<String>,
     assets: Vec<GithubAsset>,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
 }
 
 #[derive(Deserialize)]
@@ -472,6 +476,118 @@ pub async fn list_releases(
             prerelease: channel == Channel::Test,
         })
         .collect())
+}
+
+/// Опублікована версія збірки для відкату: реліз із `.mrpack` і позначка, чи вона зараз
+/// «актуальна» (`/releases/latest` репозиторію).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerrariumReleaseVersion {
+    pub release: TerrariumRelease,
+    pub latest: bool,
+}
+
+/// Опубліковані версії збірки (новіші перші) — для відкату на попередню.
+/// Чернетки й pre-release пропускаємо: гравцям вони не віддаються.
+#[tracing::instrument]
+pub async fn list_release_versions(
+    pack: PackKind,
+    channel: Channel,
+    limit: u32,
+) -> crate::Result<Vec<TerrariumReleaseVersion>> {
+    let token = read_token(&get_state().await?);
+    let repo = pack.repo(channel);
+    let url = format!(
+        "https://api.github.com/repos/{repo}/releases?per_page={}",
+        limit.clamp(1, 100)
+    );
+    let releases: Vec<GithubRelease> =
+        github_get_json(&url, token.as_deref(), "Список версій").await?;
+    let latest_id =
+        fetch_repo_latest(repo, token.as_deref(), "Актуальна версія")
+            .await
+            .ok()
+            .flatten()
+            .map(|r| r.id);
+    Ok(releases
+        .into_iter()
+        .filter(|r| !r.draft && !r.prerelease)
+        .filter_map(|r| {
+            let id = r.id;
+            to_release(pack, channel, repo, r, false)
+                .ok()
+                .map(|release| TerrariumReleaseVersion {
+                    release,
+                    latest: Some(id) == latest_id,
+                })
+        })
+        .collect())
+}
+
+/// Адмін: зробити старішу версію актуальною для всіх (відкат релізу).
+///
+/// Нічого не видаляємо: GitHub просто отримує `make_latest` для вибраного релізу, і
+/// `/releases/latest` (за ним гравці бачать «Оновити») віддає вже його. Новіші релізи
+/// лишаються на місці; щоб повернути їх, досить ще раз зробити актуальним потрібний реліз
+/// або опублікувати новий.
+#[tracing::instrument]
+pub async fn set_latest_release(
+    pack: PackKind,
+    channel: Channel,
+    release_id: u64,
+) -> crate::Result<TerrariumRelease> {
+    let terrarium = get_state().await?;
+    let token = terrarium.admin_token.clone().ok_or_else(|| {
+        crate::ErrorKind::OtherError(
+            "Адмін-ключ не задано — додай його в налаштуваннях".to_string(),
+        )
+    })?;
+    let repo = pack.repo(channel);
+    let target: GithubRelease = github_json(
+        REQWEST_CLIENT
+            .get(format!(
+                "https://api.github.com/repos/{repo}/releases/{release_id}"
+            ))
+            .bearer_auth(&token),
+        "Реліз для відкату",
+    )
+    .await?;
+    if target.draft || target.prerelease {
+        return Err(crate::ErrorKind::OtherError(format!(
+            "Реліз {} — чернетка або pre-release, актуальним його зробити не можна",
+            target.tag_name
+        ))
+        .into());
+    }
+    let tag = target.tag_name.clone();
+    // Перевіряємо, що в релізі є .mrpack — інакше гравцям не буде що ставити
+    to_release(pack, channel, repo, target, false)?;
+
+    github_json::<serde_json::Value>(
+        REQWEST_CLIENT
+            .patch(format!(
+                "https://api.github.com/repos/{repo}/releases/{release_id}"
+            ))
+            .bearer_auth(&token)
+            .json(&serde_json::json!({ "make_latest": "true" })),
+        "Відкат актуальної версії",
+    )
+    .await?;
+
+    let latest = fetch_repo_latest(repo, Some(&token), "Актуальна версія")
+        .await?
+        .ok_or_else(|| {
+            crate::ErrorKind::OtherError(format!(
+                "У репозиторії {repo} немає релізів"
+            ))
+        })?;
+    if latest.id != release_id {
+        return Err(crate::ErrorKind::OtherError(format!(
+            "GitHub прийняв запит, але актуальною лишилась {} замість {tag}",
+            latest.tag_name
+        ))
+        .into());
+    }
+    to_release(pack, channel, repo, latest, false)
 }
 
 /// Мітка issues, якими гра (TerrariumWorld, кнопка в меню паузи) надсилає звіти про лаги.

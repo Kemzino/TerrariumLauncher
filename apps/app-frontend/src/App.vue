@@ -70,6 +70,7 @@ import SharedInstanceInviteHandler from '@/components/ui/shared-instances/shared
 import SplashScreen from '@/components/ui/SplashScreen.vue'
 import SurveyPopup from '@/components/ui/SurveyPopup.vue'
 import SyncInstancesUpdateModal from '@/components/ui/sync-instances-update-modal/index.vue'
+import TerrariumCurseForgeBlockedModal from '@/components/ui/TerrariumCurseForgeBlockedModal.vue'
 import TerrariumNavDrawer from '@/components/ui/TerrariumNavDrawer.vue'
 import TerrariumScrollbar from '@/components/ui/TerrariumScrollbar.vue'
 import WindowControls from '@/components/ui/WindowControls.vue'
@@ -2206,6 +2207,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	<NotificationPanel :has-sidebar="sidebarVisible" />
 	<PopupNotificationPanel :has-sidebar="sidebarVisible" />
 	<ErrorModal ref="errorModal" />
+	<TerrariumCurseForgeBlockedModal />
 	<MinecraftAuthErrorModal ref="minecraftAuthErrorModal" />
 	<MinecraftRequiredModal ref="minecraftRequiredModal" />
 	<ContentInstallModal

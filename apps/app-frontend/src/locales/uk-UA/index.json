@@ -1362,7 +1362,7 @@
     "message": "Спершу завантажте скін!"
   },
   "app.skins.offline-account.description": {
-    "message": "Увійди через акаунт Microsoft, щоб вибирати й ставити скіни."
+    "message": "Скіни працюють лише з ліцензійним акаунтом Minecraft. Увійди через Microsoft, щоб вибирати й ставити скіни."
   },
   "app.skins.offline-account.title": {
     "message": "Скіни недоступні для офлайн-акаунтів"

@@ -1648,8 +1648,85 @@ pub struct CurseForgeInstallResult {
     /// Назви модів, які вже були в примірнику
     pub skipped: Vec<String>,
     /// Обов'язкові залежності, які не вдалося поставити (нема файлу для
-    /// версії/завантажувача або автор заборонив завантаження)
+    /// версії/завантажувача)
     pub failed: Vec<String>,
+    /// Автор заборонив сторонні завантаження, і на Modrinth файлу нема — гравець
+    /// докачує його зі сторінки CurseForge
+    #[serde(default)]
+    pub blocked: Vec<CurseForgeBlockedFile>,
+    /// Взяті з Modrinth за назвою (той самий мод, інший файл)
+    #[serde(default)]
+    pub substituted: Vec<String>,
+}
+
+enum Installable {
+    Ready {
+        details: CfFileDetailsRaw,
+        bytes: bytes::Bytes,
+        sha1: String,
+        file_name: String,
+        substituted: bool,
+    },
+    Blocked(CfFileDetailsRaw),
+}
+
+/// Файл мода для установки: з CurseForge, якщо автор дозволяє сторонні
+/// завантаження; інакше той самий файл (sha1) або мод (назва) з Modrinth;
+/// інакше — `Blocked`, гравець качає його вручну.
+async fn fetch_installable(
+    key: &str,
+    m: &CurseForgeMod,
+    file_id: u64,
+    game_version: &str,
+    loader: ModLoader,
+) -> crate::Result<Installable> {
+    let envelope: Envelope<CfFileDetailsRaw> =
+        get_json(key, &format!("/mods/{}/files/{file_id}", m.id)).await?;
+    let details = envelope.data;
+    if details.download_url.is_some() {
+        let (details, bytes, sha1) =
+            download_file_bytes(key, m.id, file_id).await?;
+        let file_name = details.file_name.clone();
+        return Ok(Installable::Ready {
+            details,
+            bytes,
+            sha1,
+            file_name,
+            substituted: false,
+        });
+    }
+    let by_hash = match cf_sha1(&details) {
+        Some(sha1) => modrinth_by_hashes(std::slice::from_ref(&sha1))
+            .await
+            .remove(&sha1),
+        None => None,
+    };
+    let substitute = match by_hash {
+        Some(found) => Some(found),
+        None => {
+            modrinth_by_name(
+                &m.slug,
+                &m.name,
+                m.class_id,
+                game_version,
+                Some(loader.as_str()),
+            )
+            .await
+        }
+    };
+    let Some(substitute) =
+        substitute.filter(|s| path_util::is_safe_file_name(&s.file_name))
+    else {
+        return Ok(Installable::Blocked(details));
+    };
+    let (bytes, sha1) = download_substitute(&substitute).await?;
+    Ok(Installable::Ready {
+        details,
+        bytes,
+        sha1,
+        file_name: substitute.file_name.clone(),
+        substituted: !substitute.exact,
+    })
 }
 
 async fn download_file_bytes(
@@ -1783,8 +1860,10 @@ pub async fn install_mod(
             result.failed.push(m.name.clone());
             continue;
         };
-        let (file, bytes, sha1) =
-            match download_file_bytes(&key, m.id, chosen).await {
+        let fetched =
+            match fetch_installable(&key, &m, chosen, &game_version, loader)
+                .await
+            {
                 Ok(v) => v,
                 Err(err) if !is_root => {
                     tracing::warn!(
@@ -1796,6 +1875,36 @@ pub async fn install_mod(
                 }
                 Err(err) => return Err(err),
             };
+        let (file, bytes, sha1, file_name) = match fetched {
+            Installable::Ready {
+                details,
+                bytes,
+                sha1,
+                file_name,
+                substituted,
+            } => {
+                if substituted {
+                    result.substituted.push(m.name.clone());
+                }
+                (details, bytes, sha1, file_name)
+            }
+            Installable::Blocked(details) => {
+                // Гравець докачає сам зі сторінки CurseForge; залежності все одно ставимо
+                result.blocked.push(blocked_file(
+                    m.id, &m.name, &m.slug, m.class_id, &details,
+                ));
+                if with_dependencies {
+                    for dep in details
+                        .dependencies
+                        .iter()
+                        .filter(|d| d.relation_type == 3)
+                    {
+                        queue.push((dep.mod_id, None, false));
+                    }
+                }
+                continue;
+            }
+        };
         // Той самий мод уже є (з CurseForge — за ID, з Modrinth — за slug):
         // для головного мода це зміна версії — старий файл прибираємо, новий
         // кладемо в ту саму групу з тим самим станом; залежність пропускаємо
@@ -1805,7 +1914,7 @@ pub async fn install_mod(
                 i.curseforge.as_ref().is_some_and(|c| c.mod_id == m.id)
                     || i.project.as_ref().and_then(|p| p.slug.as_deref())
                         == Some(m.slug.as_str())
-                    || i.file_name == file.file_name
+                    || i.file_name == file_name
             })
             .collect();
         if !existing.is_empty() && !is_root {
@@ -1822,7 +1931,7 @@ pub async fn install_mod(
         }
         let mut path = commands::add_project_bytes(
             &instance_id,
-            &file.file_name,
+            &file_name,
             bytes,
             Some(&sha1),
             project_type_of_class(m.class_id),
@@ -1948,8 +2057,15 @@ pub struct CurseForgeModpackPrepared {
     pub game_version: String,
     pub loader: Option<String>,
     pub file_count: usize,
-    /// Назви модів, для яких автор заборонив сторонні завантаження
+    /// Назви модів, яких у збірці не буде (автор заборонив сторонні
+    /// завантаження і на Modrinth їх не знайшлось)
     pub missing: Vec<String>,
+    /// Заблоковані файли, які гравець може докачати вручну зі сторінки CurseForge
+    #[serde(default)]
+    pub blocked: Vec<CurseForgeBlockedFile>,
+    /// Моди, взяті з Modrinth за назвою (той самий мод, але інший файл, ніж у збірці)
+    #[serde(default)]
+    pub substituted: Vec<String>,
     /// Іконка збірки, завантажена в кеш (для іконки примірника)
     pub icon_path: Option<String>,
 }
@@ -2048,6 +2164,7 @@ pub async fn prepare_modpack(
         .collect();
     let mut class_by_mod: HashMap<u64, Option<u32>> = HashMap::new();
     let mut name_by_mod: HashMap<u64, String> = HashMap::new();
+    let mut slug_by_mod: HashMap<u64, String> = HashMap::new();
     for chunk in mod_ids.chunks(BATCH) {
         let ids: Vec<u64> =
             chunk.iter().filter_map(|s| s.parse().ok()).collect();
@@ -2056,6 +2173,7 @@ pub async fn prepare_modpack(
             post_json(&key, "/mods", &body).await?;
         for raw in envelope.data {
             class_by_mod.insert(raw.id, raw.class_id);
+            slug_by_mod.insert(raw.id, raw.slug);
             name_by_mod.insert(raw.id, raw.name);
         }
     }
@@ -2070,54 +2188,29 @@ pub async fn prepare_modpack(
         }
     }
 
-    // Файли, які автор заборонив завантажувати через CF API, часто є на
-    // Modrinth — шукаємо за sha1 і беремо посилання звідти
+    // Файли, які автор заборонив завантажувати стороннім (нема downloadUrl), із
+    // CDN CurseForge не беремо. Шукаємо їх на Modrinth: спершу той самий файл за
+    // sha1, далі той самий мод за slug / назвою для версії гри й завантажувача
     let blocked_hashes: Vec<String> = manifest
         .files
         .iter()
         .filter_map(|e| details_by_id.get(&e.file_id))
         .filter(|d| d.download_url.is_none())
-        .filter_map(|d| d.hashes.iter().find(|h| h.algo == 1))
-        .map(|h| h.value.to_lowercase())
+        .filter_map(cf_sha1)
         .collect();
-    let mut modrinth_url_by_hash: HashMap<String, String> = HashMap::new();
-    if !blocked_hashes.is_empty() {
-        let refs: Vec<&str> =
-            blocked_hashes.iter().map(String::as_str).collect();
-        if let Ok(found) = crate::state::CachedEntry::get_file_many(
-            &refs,
-            None,
-            &state.pool,
-            &state.api_semaphore,
-        )
-        .await
-        {
-            let version_ids: Vec<String> =
-                found.iter().map(|f| f.version_id.clone()).collect();
-            let version_refs: Vec<&str> =
-                version_ids.iter().map(String::as_str).collect();
-            if let Ok(versions) = crate::state::CachedEntry::get_version_many(
-                &version_refs,
-                None,
-                &state.pool,
-                &state.api_semaphore,
-            )
-            .await
-            {
-                for version in versions {
-                    for file in version.files {
-                        if let Some(sha1) = file.hashes.get("sha1") {
-                            modrinth_url_by_hash
-                                .insert(sha1.to_lowercase(), file.url.clone());
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let by_hash = modrinth_by_hashes(&blocked_hashes).await;
+    let pack_loader = manifest
+        .minecraft
+        .mod_loaders
+        .iter()
+        .find(|l| l.primary)
+        .or_else(|| manifest.minecraft.mod_loaders.first())
+        .and_then(|l| l.id.split_once('-').map(|(name, _)| name.to_string()));
 
     let mut index_files = Vec::new();
     let mut missing = Vec::new();
+    let mut blocked = Vec::new();
+    let mut substituted = Vec::new();
     for entry in &manifest.files {
         let name = name_by_mod
             .get(&entry.project_id)
@@ -2127,38 +2220,69 @@ pub async fn prepare_modpack(
             missing.push(name);
             continue;
         };
-        let sha1 = details
-            .hashes
-            .iter()
-            .find(|h| h.algo == 1)
-            .map(|h| h.value.to_lowercase());
-        let url = details.download_url.clone().or_else(|| {
-            sha1.as_deref()
-                .and_then(|h| modrinth_url_by_hash.get(h).cloned())
-        });
-        let Some(url) = url else {
-            if entry.required {
-                missing.push(name);
-            }
-            continue;
-        };
         if !path_util::is_safe_file_name(&details.file_name) {
             missing.push(name);
             continue;
         }
-        let folder = folder_for_class(
-            class_by_mod.get(&entry.project_id).copied().flatten(),
-        );
+        let class_id = class_by_mod.get(&entry.project_id).copied().flatten();
+        let folder = folder_for_class(class_id);
+        let sha1 = cf_sha1(details);
         let mut hashes = serde_json::Map::new();
-        if let Some(sha1) = &sha1 {
-            hashes
-                .insert("sha1".into(), serde_json::Value::String(sha1.clone()));
-        }
+        let (url, file_name, size) = if let Some(url) = &details.download_url {
+            if let Some(sha1) = &sha1 {
+                hashes.insert("sha1".into(), sha1.clone().into());
+            }
+            (url.clone(), details.file_name.clone(), details.file_length)
+        } else {
+            let slug = slug_by_mod
+                .get(&entry.project_id)
+                .cloned()
+                .unwrap_or_default();
+            let substitute = match sha1.as_deref().and_then(|h| by_hash.get(h))
+            {
+                Some(found) => Some(found.clone()),
+                None => {
+                    modrinth_by_name(
+                        &slug,
+                        &name,
+                        class_id,
+                        &manifest.minecraft.version,
+                        pack_loader.as_deref(),
+                    )
+                    .await
+                }
+            };
+            let Some(substitute) = substitute
+                .filter(|s| path_util::is_safe_file_name(&s.file_name))
+            else {
+                if entry.required {
+                    blocked.push(blocked_file(
+                        entry.project_id,
+                        &name,
+                        &slug,
+                        class_id,
+                        details,
+                    ));
+                    missing.push(name);
+                }
+                continue;
+            };
+            if !substitute.exact {
+                substituted.push(name);
+            }
+            if let Some(sha1) = &substitute.sha1 {
+                hashes.insert("sha1".into(), sha1.clone().into());
+            }
+            if let Some(sha512) = &substitute.sha512 {
+                hashes.insert("sha512".into(), sha512.clone().into());
+            }
+            (substitute.url, substitute.file_name, substitute.size)
+        };
         index_files.push(serde_json::json!({
-            "path": format!("{folder}/{}", details.file_name),
+            "path": format!("{folder}/{file_name}"),
             "hashes": hashes,
             "downloads": [url],
-            "fileSize": details.file_length,
+            "fileSize": size,
         }));
     }
 
@@ -2252,5 +2376,465 @@ pub async fn prepare_modpack(
         loader: loader.map(|(k, _)| k.to_string()),
         file_count: manifest.files.len(),
         missing,
+        blocked,
+        substituted,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Файли, які автори заборонили качати стороннім лаунчерам (нема downloadUrl).
+//
+// Із CDN CurseForge їх не тягнемо — автор свідомо вимкнув це. Робимо те саме,
+// що Prism / ATLauncher:
+// 1. шукаємо той самий файл на Modrinth (за sha1), а якщо його там нема — той
+//    самий мод за slug / назвою з потрібною версією гри й завантажувачем;
+// 2. решту гравець качає сам зі сторінки CurseForge у браузері: лаунчер стежить
+//    за текою «Завантаження», упізнає файл за sha1 і кладе його в примірник.
+
+/// Файл, який гравцю треба завантажити вручну зі сторінки CurseForge.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CurseForgeBlockedFile {
+    pub mod_id: u64,
+    pub file_id: u64,
+    /// Назва мода
+    pub name: String,
+    pub file_name: String,
+    /// Клас CurseForge (мод / ресурспак / шейдер / датапак) — від нього тека
+    pub class_id: Option<u32>,
+    /// Сторінка завантаження файлу на CurseForge (відкривається в браузері)
+    pub page_url: String,
+    /// sha1 з CurseForge — за ним упізнаємо завантажений файл
+    pub sha1: Option<String>,
+    pub size: u64,
+}
+
+/// Файл із теки «Завантаження», що збігся з очікуваним.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CurseForgeFoundFile {
+    pub file_id: u64,
+    pub path: String,
+}
+
+/// Розділ сайту CurseForge за класом проєкту.
+fn site_section(class_id: Option<u32>) -> &'static str {
+    match class_id {
+        Some(12) => "texture-packs",
+        Some(6552) => "shaders",
+        Some(6945) => "data-packs",
+        Some(4471) => "modpacks",
+        _ => "mc-mods",
+    }
+}
+
+/// Сторінка, з якої браузер одразу почне завантаження файлу.
+fn manual_download_url(
+    slug: &str,
+    class_id: Option<u32>,
+    file_id: u64,
+) -> String {
+    format!(
+        "https://www.curseforge.com/minecraft/{}/{slug}/download/{file_id}",
+        site_section(class_id)
+    )
+}
+
+fn blocked_file(
+    mod_id: u64,
+    name: &str,
+    slug: &str,
+    class_id: Option<u32>,
+    details: &CfFileDetailsRaw,
+) -> CurseForgeBlockedFile {
+    CurseForgeBlockedFile {
+        mod_id,
+        file_id: details.id,
+        name: name.to_string(),
+        file_name: details.file_name.clone(),
+        class_id,
+        page_url: manual_download_url(slug, class_id, details.id),
+        sha1: cf_sha1(details),
+        size: details.file_length,
+    }
+}
+
+fn cf_sha1(details: &CfFileDetailsRaw) -> Option<String> {
+    details
+        .hashes
+        .iter()
+        .find(|h| h.algo == 1)
+        .map(|h| h.value.to_lowercase())
+}
+
+/// Замінник із Modrinth для заблокованого файлу.
+#[derive(Debug, Clone)]
+struct ModrinthSubstitute {
+    url: String,
+    file_name: String,
+    sha1: Option<String>,
+    sha512: Option<String>,
+    size: u64,
+    /// Той самий файл (збіг sha1); `false` — той самий мод, знайдений за назвою
+    exact: bool,
+}
+
+#[derive(Deserialize)]
+struct MrVersionFile {
+    #[serde(default)]
+    hashes: HashMap<String, String>,
+    url: String,
+    filename: String,
+    #[serde(default)]
+    primary: bool,
+    #[serde(default)]
+    size: u64,
+}
+
+#[derive(Deserialize)]
+struct MrVersion {
+    #[serde(default)]
+    version_type: String,
+    #[serde(default)]
+    date_published: String,
+    #[serde(default)]
+    files: Vec<MrVersionFile>,
+}
+
+#[derive(Deserialize)]
+struct MrProject {
+    id: String,
+    #[serde(default)]
+    slug: Option<String>,
+    title: String,
+    #[serde(default)]
+    project_type: String,
+}
+
+#[derive(Deserialize)]
+struct MrSearchHit {
+    project_id: String,
+    title: String,
+}
+
+#[derive(Deserialize)]
+struct MrSearch {
+    #[serde(default)]
+    hits: Vec<MrSearchHit>,
+}
+
+impl MrVersionFile {
+    fn into_substitute(self, exact: bool) -> ModrinthSubstitute {
+        ModrinthSubstitute {
+            sha1: self.hashes.get("sha1").map(|h| h.to_lowercase()),
+            sha512: self.hashes.get("sha512").map(|h| h.to_lowercase()),
+            url: self.url,
+            file_name: self.filename,
+            size: self.size,
+            exact,
+        }
+    }
+}
+
+async fn modrinth_get<T: serde::de::DeserializeOwned>(
+    path: &str,
+    uri_path: &'static str,
+) -> Option<T> {
+    let state = State::get().await.ok()?;
+    crate::util::fetch::fetch_json(
+        reqwest::Method::GET,
+        &format!("{}{path}", env!("MODRINTH_API_URL")),
+        None,
+        None,
+        Some(uri_path),
+        &state.api_semaphore,
+        &state.pool,
+    )
+    .await
+    .map_err(|err| {
+        tracing::debug!("Terrarium/CurseForge → Modrinth {path}: {err}")
+    })
+    .ok()
+}
+
+/// Ті самі файли на Modrinth за sha1 (`POST /version_files`): sha1 → файл.
+async fn modrinth_by_hashes(
+    sha1s: &[String],
+) -> HashMap<String, ModrinthSubstitute> {
+    let mut found = HashMap::new();
+    if sha1s.is_empty() {
+        return found;
+    }
+    let Ok(state) = State::get().await else {
+        return found;
+    };
+    let versions: crate::Result<HashMap<String, MrVersion>> =
+        crate::util::fetch::fetch_json(
+            reqwest::Method::POST,
+            &format!("{}version_files", env!("MODRINTH_API_URL")),
+            None,
+            Some(serde_json::json!({ "hashes": sha1s, "algorithm": "sha1" })),
+            Some("/v2/version_files"),
+            &state.api_semaphore,
+            &state.pool,
+        )
+        .await;
+    let Ok(versions) = versions else {
+        return found;
+    };
+    for (hash, version) in versions {
+        let hash = hash.to_lowercase();
+        if let Some(file) = version.files.into_iter().find(|f| {
+            f.hashes.get("sha1").map(|h| h.to_lowercase()).as_deref()
+                == Some(hash.as_str())
+        }) {
+            found.insert(hash, file.into_substitute(true));
+        }
+    }
+    found
+}
+
+/// «Create: Steam 'n' Rails» і «Create Steam n Rails» — одна назва.
+fn normalized_title(title: &str) -> String {
+    title
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn modrinth_project_type(class_id: Option<u32>) -> &'static str {
+    match class_id {
+        Some(12) => "resourcepack",
+        Some(6552) => "shader",
+        Some(6945) => "datapack",
+        _ => "mod",
+    }
+}
+
+/// Найновіший файл проєкту Modrinth для версії гри (і завантажувача — для модів).
+async fn modrinth_latest_file(
+    project_id: &str,
+    game_version: &str,
+    loader: Option<&str>,
+) -> Option<ModrinthSubstitute> {
+    let mut query = format!(
+        "project/{}/version?game_versions={}",
+        urlencoding::encode(project_id),
+        urlencoding::encode(&serde_json::json!([game_version]).to_string())
+    );
+    if let Some(loader) = loader {
+        let _ = write!(
+            query,
+            "&loaders={}",
+            urlencoding::encode(&serde_json::json!([loader]).to_string())
+        );
+    }
+    let mut versions: Vec<MrVersion> =
+        modrinth_get(&query, "/v2/project/{id}/version").await?;
+    // Реліз, якщо є; інакше будь-яка найновіша
+    let newest = |release_only: bool| {
+        versions
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| !release_only || v.version_type == "release")
+            .max_by(|(_, a), (_, b)| a.date_published.cmp(&b.date_published))
+            .map(|(i, _)| i)
+    };
+    let index = newest(true).or_else(|| newest(false))?;
+    let mut files = versions.swap_remove(index).files;
+    if files.is_empty() {
+        return None;
+    }
+    let primary = files.iter().position(|f| f.primary).unwrap_or(0);
+    Some(files.swap_remove(primary).into_substitute(false))
+}
+
+/// Той самий мод на Modrinth за slug, а далі за назвою (назва мусить збігтися
+/// повністю — схожий мод іншого автора нам не потрібен).
+async fn modrinth_by_name(
+    slug: &str,
+    name: &str,
+    class_id: Option<u32>,
+    game_version: &str,
+    loader: Option<&str>,
+) -> Option<ModrinthSubstitute> {
+    let wanted = normalized_title(name);
+    if wanted.is_empty() {
+        return None;
+    }
+    let project_type = modrinth_project_type(class_id);
+    // Завантажувач має сенс лише для модів (ресурспаки/шейдери — без нього)
+    let loader = if project_type == "mod" { loader } else { None };
+
+    if let Some(project) = modrinth_get::<MrProject>(
+        &format!("project/{}", urlencoding::encode(slug)),
+        "/v2/project/{id}",
+    )
+    .await
+        && project.project_type == project_type
+        && normalized_title(&project.title) == wanted
+        && let Some(found) =
+            modrinth_latest_file(&project.id, game_version, loader).await
+    {
+        tracing::info!(
+            "Terrarium/CurseForge: «{name}» знайдено на Modrinth за slug {}",
+            project.slug.as_deref().unwrap_or(slug)
+        );
+        return Some(found);
+    }
+
+    let mut facets = vec![
+        vec![format!("project_type:{project_type}")],
+        vec![format!("versions:{game_version}")],
+    ];
+    if let Some(loader) = loader {
+        facets.push(vec![format!("categories:{loader}")]);
+    }
+    let search: MrSearch = modrinth_get(
+        &format!(
+            "search?limit=5&query={}&facets={}",
+            urlencoding::encode(name),
+            urlencoding::encode(&serde_json::json!(facets).to_string())
+        ),
+        "/v2/search",
+    )
+    .await?;
+    let hit = search
+        .hits
+        .into_iter()
+        .find(|h| normalized_title(&h.title) == wanted)?;
+    let found =
+        modrinth_latest_file(&hit.project_id, game_version, loader).await?;
+    tracing::info!(
+        "Terrarium/CurseForge: «{name}» знайдено на Modrinth за назвою ({})",
+        hit.project_id
+    );
+    Some(found)
+}
+
+/// Завантажити файл-замінник із Modrinth (з перевіркою sha1).
+async fn download_substitute(
+    substitute: &ModrinthSubstitute,
+) -> crate::Result<(bytes::Bytes, String)> {
+    let state = State::get().await?;
+    let bytes = crate::util::fetch::fetch(
+        &substitute.url,
+        substitute.sha1.as_deref(),
+        None,
+        None,
+        &state.fetch_semaphore,
+        &state.pool,
+    )
+    .await?;
+    let sha1 = crate::util::fetch::sha1_async(bytes.clone()).await?;
+    Ok((bytes, sha1))
+}
+
+/// Тека «Завантаження» користувача, за якою стежить вікно заблокованих файлів.
+pub fn downloads_dir() -> Option<std::path::PathBuf> {
+    dirs::download_dir()
+}
+
+/// Шукає в «Завантаженнях» очікувані файли: кандидат — файл того самого розміру,
+/// підтвердження — sha1 з CurseForge (без sha1 — ще й та сама назва файлу).
+#[tracing::instrument(skip(files))]
+pub async fn scan_downloads(
+    files: Vec<CurseForgeBlockedFile>,
+) -> crate::Result<Vec<CurseForgeFoundFile>> {
+    let Some(dir) = downloads_dir() else {
+        return Ok(Vec::new());
+    };
+    tokio::task::spawn_blocking(move || {
+        let mut found = Vec::new();
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return found;
+        };
+        let mut pending: Vec<&CurseForgeBlockedFile> = files.iter().collect();
+        for entry in entries.flatten() {
+            if pending.is_empty() {
+                break;
+            }
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            if !metadata.is_file() {
+                continue;
+            }
+            let size = metadata.len();
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            let candidates: Vec<usize> = pending
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| f.size == 0 || f.size == size)
+                .filter(|(_, f)| f.sha1.is_some() || f.file_name == file_name)
+                .map(|(i, _)| i)
+                .collect();
+            if candidates.is_empty() {
+                continue;
+            }
+            // Файл ще пишеться чи зайнятий — спробуємо наступного разу
+            let path = entry.path();
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let sha1 = sha1_smol::Sha1::from(&bytes).hexdigest();
+            if let Some(index) = candidates
+                .into_iter()
+                .find(|&i| pending[i].sha1.as_deref().is_none_or(|h| h == sha1))
+            {
+                found.push(CurseForgeFoundFile {
+                    file_id: pending[index].file_id,
+                    path: path.to_string_lossy().to_string(),
+                });
+                pending.remove(index);
+            }
+        }
+        found
+    })
+    .await
+    .map_err(|e| crate::ErrorKind::OtherError(e.to_string()).into())
+}
+
+/// Кладе вручну завантажений файл у примірник (повторно звіряючи sha1).
+#[tracing::instrument]
+pub async fn import_blocked_file(
+    instance_id: String,
+    file: CurseForgeBlockedFile,
+    path: String,
+) -> crate::Result<String> {
+    use crate::state::instances::commands;
+
+    let state = State::get().await?;
+    let bytes = bytes::Bytes::from(crate::util::io::read(&path).await?);
+    let sha1 = crate::util::fetch::sha1_async(bytes.clone()).await?;
+    match &file.sha1 {
+        Some(expected) if *expected != sha1 => {
+            return Err(crate::ErrorKind::InputError(format!(
+                "{path} — не той файл: sha1 не збігається з «{}» на CurseForge",
+                file.file_name
+            ))
+            .into());
+        }
+        None if file.size != 0 && file.size != bytes.len() as u64 => {
+            return Err(crate::ErrorKind::InputError(format!(
+                "{path} — не той файл: розмір не збігається з «{}»",
+                file.file_name
+            ))
+            .into());
+        }
+        _ => {}
+    }
+    let installed = commands::add_project_bytes(
+        &instance_id,
+        &file.file_name,
+        bytes,
+        Some(&sha1),
+        project_type_of_class(file.class_id).or(Some(ProjectType::Mod)),
+        crate::state::instances::ContentSourceKind::Local,
+        None,
+        None,
+        &state,
+    )
+    .await?;
+    crate::state::sync_content_files(&instance_id, &state).await?;
+    Ok(installed)
 }

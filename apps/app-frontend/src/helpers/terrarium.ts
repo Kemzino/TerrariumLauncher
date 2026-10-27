@@ -174,6 +174,40 @@ export async function terrarium_promote_release(pack: PackKind, releaseId: numbe
 	})
 }
 
+/** Опублікована версія збірки для відкату; `latest` — саме її зараз отримують гравці. */
+export interface TerrariumReleaseVersion {
+	release: TerrariumRelease
+	latest: boolean
+}
+
+/** Опубліковані версії збірки (новіші перші). */
+export async function terrarium_list_release_versions(
+	pack: PackKind,
+	channel: Channel = 'stable',
+	limit = 30,
+) {
+	return await invoke<TerrariumReleaseVersion[]>(
+		'plugin:terrarium|terrarium_list_release_versions',
+		{ pack, channel, limit },
+	)
+}
+
+/**
+ * Адмін: зробити вибраний реліз актуальним для всіх (відкат). Нічого не видаляє —
+ * GitHub лише позначає реліз як latest.
+ */
+export async function terrarium_set_latest_release(
+	pack: PackKind,
+	channel: Channel,
+	releaseId: number,
+) {
+	return await invoke<TerrariumRelease>('plugin:terrarium|terrarium_set_latest_release', {
+		pack,
+		channel,
+		releaseId,
+	})
+}
+
 export async function terrarium_download_release(release: TerrariumRelease) {
 	return await invoke<string>('plugin:terrarium|terrarium_download_release', { release })
 }
@@ -343,6 +377,27 @@ export async function terrarium_publish_preview(pack: PackKind, instanceId: stri
 }
 
 /** Наступний patch-тег після поточного: v1.2.3 → v1.2.4; якщо нічого — v1.0.0. */
+/** Порівняння тегів v1.2.3 як версій: додатне, якщо `a` новіший. */
+export function compareTags(a: string, b: string): number {
+	const pa = a.replace(/^v/, '').split(/[.-]/).map(Number)
+	const pb = b.replace(/^v/, '').split(/[.-]/).map(Number)
+	if (pa.some(Number.isNaN) || pb.some(Number.isNaN)) return a.localeCompare(b)
+	for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+		const diff = (pa[i] ?? 0) - (pb[i] ?? 0)
+		if (diff !== 0) return diff
+	}
+	return 0
+}
+
+/** Найновіший тег зі списку (після відкату актуальний реліз — не обов'язково найновіший). */
+export function newestTag(tags: (string | null | undefined)[]): string | null {
+	let best: string | null = null
+	for (const tag of tags) {
+		if (tag && (best === null || compareTags(tag, best) > 0)) best = tag
+	}
+	return best
+}
+
 export function suggestNextTag(current: string | null | undefined): string {
 	const match = current?.match(/^(v?)(\d+)\.(\d+)\.(\d+)$/)
 	if (!match) return 'v1.0.0'
@@ -472,42 +527,3 @@ export async function terrarium_set_graalvm(instanceId: string, enabled: boolean
 		enabled,
 	})
 }
-
-// ---------------------------------------------------------------------------
-// Voxy: збирається в гравця з коду (ліцензія не дозволяє поширювати jar)
-
-export interface VoxyStatus {
-	/** Примірник — NeoForge 1.21.1 */
-	compatible: boolean
-	/** Назва встановленого jar Voxy */
-	installed: string | null
-	/** Встановлено з зафіксованого коміту */
-	up_to_date: boolean
-	commit: string
-	repo: string
-	building: boolean
-	stage: string | null
-	/** 0..1 */
-	progress: number
-}
-
-export async function terrarium_voxy_status(instanceId: string) {
-	return await invoke<VoxyStatus>('plugin:terrarium|terrarium_voxy_status', { instanceId })
-}
-
-/** Качає код Voxy, збирає (кілька хвилин) і кладе jar у mods/ примірника. */
-export async function terrarium_voxy_build(instanceId: string) {
-	return await invoke<VoxyStatus>('plugin:terrarium|terrarium_voxy_build', { instanceId })
-}
-
-export async function terrarium_voxy_remove(instanceId: string) {
-	return await invoke<VoxyStatus>('plugin:terrarium|terrarium_voxy_remove', { instanceId })
-}
-
-/** Скасовує збірку Voxy, що йде; true — було що скасовувати */
-export async function terrarium_voxy_cancel() {
-	return await invoke<boolean>('plugin:terrarium|terrarium_voxy_cancel')
-}
-
-/** Текст помилки, з якою завершується скасована збірка (див. `terrarium_voxy::CANCELLED`) */
-export const VOXY_CANCELLED = 'Збірку Voxy скасовано'

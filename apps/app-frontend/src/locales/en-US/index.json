@@ -3066,7 +3066,7 @@
     "message": "Upload a skin first!"
   },
   "app.skins.offline-account.description": {
-    "message": "Sign in with a Microsoft account to choose and apply skins."
+    "message": "Skins need a licensed Minecraft account. Sign in with Microsoft to choose and apply skins."
   },
   "app.skins.offline-account.title": {
     "message": "Skins are unavailable for offline accounts"

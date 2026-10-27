@@ -162,6 +162,8 @@ export const configuredXss = new FilterXSS({
 					'modfolio.creeperkatze.dev',
 					'badges.crowdin.net',
 					'moddex.gg',
+					// Terrarium: картинки з описів проєктів CurseForge — напряму з їхнього CDN
+					'media.forgecdn.net',
 				]
 
 				const allowedHostnameSuffixes = ['.github.io']

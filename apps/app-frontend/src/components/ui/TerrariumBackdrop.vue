@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { animationsPaused } from '@/composables/use-idle-animations'
+import { windowHidden } from '@/composables/use-idle-animations'
 
 // Фонові фото збірки. Достатньо покласти файли в assets/terrarium/backgrounds —
 // Vite підхопить їх при збірці, нічого реєструвати не треба.
@@ -33,11 +33,14 @@ function stop() {
 	timer = null
 }
 
-// Поки вікно неактивне або йде гра, кадр не міняється (див. use-idle-animations)
+// Кадр міняється, поки вікно видно. Раніше слайдшоу стояло й тоді, коли вікно просто
+// неактивне, а WebView2 часто вважає активне вікно неактивним — фон застигав на одному фото.
+// Дорогу частину (наїзд і плавний перехід) у неактивному вікні вимикає клас terrarium-idle
+// (global.scss): там кадр змінюється миттєво, без перемальовування щокадру.
 onMounted(() => {
-	if (!animationsPaused.value) start()
+	if (!windowHidden.value) start()
 })
-watch(animationsPaused, (paused) => (paused ? stop() : start()))
+watch(windowHidden, (hidden) => (hidden ? stop() : start()))
 
 onBeforeUnmount(stop)
 </script>

@@ -20,6 +20,13 @@ const paused = computed(() => hidden.value || !focused.value)
 /** true, поки анімації мають стояти. */
 export const animationsPaused = readonly(paused)
 
+/**
+ * true, поки вікна не видно (згорнуте / повністю закрите іншим вікном). Неактивне, але видиме
+ * вікно сюди не входить: WebView2 часто помиляється з фокусом (старт, перетягування, другий
+ * монітор), а слайдшоу через це назавжди застигало на одному кадрі.
+ */
+export const windowHidden = readonly(hidden)
+
 export function useIdleAnimations() {
 	const root = document.documentElement
 	const appWindow = getCurrentWindow()
@@ -34,12 +41,25 @@ export function useIdleAnimations() {
 		hidden.value = document.hidden
 		apply()
 	}
-	const onFocus = () => setFocused(true)
+	// Вікно Tauri стартує невидимим (visible: false) — document.hidden, прочитаний при імпорті
+	// модуля, міг лишитись true, якщо visibilitychange прийшов раніше за підписку. Тому
+	// видимість перечитуємо і тут, і на кожному фокусі/взаємодії
+	const syncHidden = () => {
+		if (hidden.value !== document.hidden) {
+			hidden.value = document.hidden
+			apply()
+		}
+	}
+	const onFocus = () => {
+		syncHidden()
+		setFocused(true)
+	}
 	const onBlur = () => setFocused(false)
 	// Клік чи клавіша — вікно точно активне, навіть якщо подію фокуса пропустили. Рух миші
 	// приходить і в неактивне вікно (другий монітор), тож тоді питаємо Tauri, не частіше
 	// разу на секунду
 	const onInteraction = () => {
+		syncHidden()
 		if (!focused.value) setFocused(true)
 	}
 	let lastFocusQuery = 0
@@ -47,6 +67,7 @@ export function useIdleAnimations() {
 		const now = Date.now()
 		if (now - lastFocusQuery < 1000) return
 		lastFocusQuery = now
+		syncHidden()
 		appWindow
 			.isFocused()
 			.then((value) => {
@@ -64,7 +85,10 @@ export function useIdleAnimations() {
 	// Подія вікна Tauri надійніша за window.blur (наприклад, при Alt+Tab у повноекранну гру)
 	let unlistenFocus: (() => void) | undefined
 	appWindow
-		.onFocusChanged(({ payload }) => setFocused(payload))
+		.onFocusChanged(({ payload }) => {
+			syncHidden()
+			setFocused(payload)
+		})
 		.then((unlisten) => {
 			if (disposed) unlisten()
 			else unlistenFocus = unlisten
@@ -76,6 +100,7 @@ export function useIdleAnimations() {
 		})
 		.catch(() => {})
 
+	hidden.value = document.hidden
 	apply()
 
 	onScopeDispose(() => {

@@ -245,3 +245,9 @@ textarea {
 .terrarium-idle *::after {
 	animation-play-state: paused !important;
 }
+
+// Слайдшоу фону в неактивному вікні не зупиняється, але кадр змінюється без плавного
+// переходу — одне перемальовування замість 1.6 с анімації під backdrop-filter
+.terrarium-idle .terrarium-backdrop__image {
+	transition: none !important;
+}

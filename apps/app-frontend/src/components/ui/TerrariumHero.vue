@@ -35,6 +35,7 @@ import TerrariumPublishModal from '@/components/ui/TerrariumPublishModal.vue'
 import TerrariumReportsModal from '@/components/ui/TerrariumReportsModal.vue'
 import TerrariumServerStatusWidget from '@/components/ui/TerrariumServerStatusWidget.vue'
 import TerrariumSyncModal from '@/components/ui/TerrariumSyncModal.vue'
+import TerrariumVersionsModal from '@/components/ui/TerrariumVersionsModal.vue'
 import { useAppEvent } from '@/composables/use-app-event'
 import { useAppSettings } from '@/composables/use-app-settings'
 import { handleSevereError } from '@/composables/use-error.js'
@@ -62,7 +63,7 @@ import {
 	terrarium_promote_release,
 	type TerrariumRelease,
 } from '@/helpers/terrarium'
-import { openTerrariumLink } from '@/helpers/terrarium-links'
+import { openTerrariumLink, TERRARIUM_SERVER_ADDRESS } from '@/helpers/terrarium-links'
 import { instanceKeys, instanceListQueryOptions } from '@/pages/instance/query-options'
 import { injectAppEvents } from '@/providers/app-events'
 
@@ -126,6 +127,16 @@ const messages = defineMessages({
 	},
 	update: { id: 'terrarium.hero.update', defaultMessage: 'Оновити' },
 	play: { id: 'terrarium.hero.play', defaultMessage: 'Грати' },
+	joinServer: { id: 'terrarium.hero.join-server', defaultMessage: 'На сервер' },
+	joinServerTooltip: {
+		id: 'terrarium.hero.join-server-tooltip',
+		defaultMessage: 'Запустити гру й одразу зайти на {address}',
+	},
+	versions: { id: 'terrarium.hero.versions', defaultMessage: 'Версії' },
+	versionsTooltip: {
+		id: 'terrarium.hero.versions-tooltip',
+		defaultMessage: 'Відкотити збірку на попередню версію',
+	},
 	playOld: { id: 'terrarium.hero.play-old', defaultMessage: 'Грати без оновлення' },
 	stop: { id: 'terrarium.hero.stop', defaultMessage: 'Зупинити' },
 	mods: { id: 'terrarium.hero.mods', defaultMessage: 'Мої моди' },
@@ -240,6 +251,10 @@ const installedTag = computed<string | null>(() => {
 })
 const publishModal = ref<InstanceType<typeof TerrariumPublishModal> | null>(null)
 const changelogModal = ref<InstanceType<typeof TerrariumChangelogModal> | null>(null)
+const versionsModal = ref<InstanceType<typeof TerrariumVersionsModal> | null>(null)
+function openVersions() {
+	versionsModal.value?.show()
+}
 // Непрочитаний список змін: останній реліз новіший за той, що гравець уже переглянув
 const changelogSeenTag = ref<string | null>(null)
 function readChangelogSeen() {
@@ -426,6 +441,11 @@ async function downloadLatest() {
 	return await terrarium_download_release(release.value)
 }
 
+async function downloadRelease(target: TerrariumRelease) {
+	busy.value = 'downloading'
+	return await terrarium_download_release(target)
+}
+
 // Прогрес поточної установки/оновлення — з подій інсталятора
 const activeJob = ref<InstallJobSnapshot | null>(null)
 let activeJobId: string | null = null
@@ -508,10 +528,18 @@ async function install() {
 }
 
 async function update() {
-	if (!instance.value) return
+	if (!release.value) return
+	await installRelease(release.value)
+}
+
+// Поставити конкретну версію в наявний примірник: оновлення до актуальної або відкат
+// на старішу (з вікна «Версії») — механізм той самий, пакет просто інший
+async function installRelease(target: TerrariumRelease) {
+	if (!instance.value || busy.value || playing.value) return
 	const pack = activePack.value
+	const channel = activeChannel.value
 	try {
-		const path = await downloadLatest()
+		const path = await downloadRelease(target)
 		busy.value = 'installing'
 		// Моди з груп — тимчасово в корінь mods/, щоб оновлення бачило їх за
 		// шляхами з попереднього пакета; apply_pack_branding повертає їх назад.
@@ -527,7 +555,7 @@ async function update() {
 		} finally {
 			await terrarium_apply_pack_branding(instance.value.id).catch(handleError)
 		}
-		await patchPack(pack, { installed_tag: release.value!.tag }, activeChannel.value)
+		await patchPack(pack, { installed_tag: target.tag }, channel)
 		await queryClient.invalidateQueries({ queryKey: instanceKeys.list() })
 	} catch (err) {
 		handleError(err)
@@ -548,6 +576,24 @@ async function play() {
 	} finally {
 		busy.value = null
 	}
+}
+
+// Запуск зі входом на сервер (quick play: --quickPlayMultiplayer для 1.20+)
+async function joinServer() {
+	if (!instance.value) return
+	busy.value = 'launching'
+	try {
+		await run(instance.value.id, TERRARIUM_SERVER_ADDRESS)
+		playing.value = true
+	} catch (err) {
+		handleSevereError(err, { instanceId: instance.value.id })
+	} finally {
+		busy.value = null
+	}
+}
+
+async function onLatestChanged() {
+	await refreshRelease()
 }
 
 async function stop() {
@@ -846,11 +892,31 @@ onMounted(async () => {
 						>
 							<PlayIcon /> {{ formatMessage(messages.play) }}
 						</Button>
+						<Button
+							v-if="!isServer"
+							v-tooltip="
+								formatMessage(messages.joinServerTooltip, { address: TERRARIUM_SERVER_ADDRESS })
+							"
+							size="xl"
+							:disabled="checking || !!busy"
+							@click="joinServer"
+						>
+							<ServerStackIcon /> {{ formatMessage(messages.joinServer) }}
+						</Button>
 					</template>
 
 					<Button v-if="installed" size="xl" :disabled="!!busy" @click="openMods">
 						<PackageOpenIcon />
 						{{ isServer ? formatMessage(messages.modsServer) : formatMessage(messages.mods) }}
+					</Button>
+					<Button
+						v-if="installed"
+						v-tooltip="formatMessage(messages.versionsTooltip)"
+						size="xl"
+						:disabled="!!busy || playing"
+						@click="openVersions"
+					>
+						<UpdatedIcon /> {{ formatMessage(messages.versions) }}
 					</Button>
 					<Button
 						v-tooltip="changelogUnread ? formatMessage(messages.changelogUnread) : undefined"
@@ -989,6 +1055,16 @@ onMounted(async () => {
 			:channel="activeChannel"
 			:installed-tag="installedTag"
 			@seen="(tag) => (changelogSeenTag = tag)"
+		/>
+		<TerrariumVersionsModal
+			ref="versionsModal"
+			:pack="activePack"
+			:channel="activeChannel"
+			:installed-tag="installedTag"
+			:is-admin="isAdmin"
+			:disabled="!!busy || playing"
+			@install="installRelease"
+			@latest-changed="onLatestChanged"
 		/>
 		<TerrariumSyncModal ref="syncModal" @synced="onSynced" />
 		<TerrariumReportsModal ref="reportsModal" @seen="onReportsSeen" />

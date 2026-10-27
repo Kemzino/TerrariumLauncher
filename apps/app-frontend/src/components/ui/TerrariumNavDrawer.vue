@@ -14,10 +14,11 @@ import {
 	XIcon,
 } from '@modrinth/assets'
 import { defineMessages, IconButton, useVIntl } from '@modrinth/ui'
-import { nextTick, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import terrariumMark from '@/assets/terrarium/logo-mark.gif'
+import { get_default_user, users } from '@/helpers/auth'
 import { openTerrariumLink } from '@/helpers/terrarium-links'
 
 const props = defineProps<{ open: boolean }>()
@@ -39,6 +40,11 @@ const messages = defineMessages({
 	browseModpacks: { id: 'terrarium.nav.browse-modpacks', defaultMessage: 'Пошук збірок' },
 	browseMods: { id: 'terrarium.nav.browse-mods', defaultMessage: 'Пошук модів' },
 	skins: { id: 'terrarium.nav.skins', defaultMessage: 'Скіни' },
+	skinsLicensedOnly: { id: 'terrarium.nav.skins-licensed-only', defaultMessage: 'ліцензія' },
+	skinsLockedHint: {
+		id: 'terrarium.nav.skins-locked-hint',
+		defaultMessage: 'Скіни доступні лише для ліцензійного акаунта Microsoft',
+	},
 	screenshots: { id: 'terrarium.nav.screenshots', defaultMessage: 'Скріншоти' },
 	newInstance: { id: 'terrarium.nav.new-instance', defaultMessage: 'Новий примірник' },
 	settings: { id: 'terrarium.nav.settings', defaultMessage: 'Налаштування' },
@@ -67,6 +73,26 @@ async function goLibrary() {
 function isActive(path: string) {
 	return route.path === path
 }
+
+// Скіни для офлайн-акаунта (піратського) закриті: профілю Mojang нема, скін не поставити.
+// Акаунт можна змінити будь-коли, тож перевіряємо щоразу, коли меню відкривається
+const skinsLocked = ref(false)
+async function refreshSkinsLocked() {
+	try {
+		const defaultId = await get_default_user()
+		const accounts = (await users()) as { profile: { id: string }; offline?: boolean }[]
+		skinsLocked.value = !!accounts.find((a) => a.profile.id === defaultId)?.offline
+	} catch {
+		skinsLocked.value = false
+	}
+}
+watch(
+	() => props.open,
+	(open) => {
+		if (open) void refreshSkinsLocked()
+	},
+	{ immediate: true },
+)
 
 // Будь-який перехід закриває меню — навіть якщо він стався не звідси
 watch(
@@ -118,10 +144,14 @@ watch(
 					</button>
 					<button
 						class="terrarium-nav__item"
-						:class="{ active: isActive('/skins') }"
+						:class="{ active: isActive('/skins'), locked: skinsLocked }"
+						:title="skinsLocked ? formatMessage(messages.skinsLockedHint) : undefined"
 						@click="go('/skins')"
 					>
 						<ShirtIcon /> {{ formatMessage(messages.skins) }}
+						<span v-if="skinsLocked" class="terrarium-nav__lock">
+							{{ formatMessage(messages.skinsLicensedOnly) }}
+						</span>
 					</button>
 					<button
 						class="terrarium-nav__item"
@@ -318,6 +348,21 @@ watch(
 		background: var(--color-brand-highlight);
 		color: var(--color-brand);
 	}
+
+	// Офлайн-акаунт: пункт приглушений, сторінка лише пояснює, чому скінів нема
+	&.locked {
+		opacity: 0.55;
+	}
+}
+
+.terrarium-nav__lock {
+	margin-left: auto;
+	padding: 0.05rem 0.45rem;
+	border-radius: 999px;
+	background: var(--color-button-bg);
+	color: var(--color-secondary);
+	font-size: 0.75rem;
+	font-weight: 600;
 }
 
 .terrarium-nav-enter-active,

@@ -68,6 +68,8 @@ function loadItemData(item: ImageViewerEditorItem): Promise<ImageViewerEditorDat
 
 	const promise = (async () => {
 		if (item.editorSource && context) return await context.loadEditorData(item.editorSource)
+		const remote = await context?.loadRemoteImage?.(item.src)
+		if (remote) return remote
 		const response = await fetch(item.src)
 		if (!response.ok) throw new Error(`Could not load image: ${response.statusText}`)
 		return { source: await response.blob() }

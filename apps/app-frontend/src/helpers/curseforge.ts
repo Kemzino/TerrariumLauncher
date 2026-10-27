@@ -40,12 +40,12 @@ export function curseforgeModPageUrl(slug: string, projectType = 'mod') {
 		projectType === 'modpack'
 			? 'modpacks'
 			: projectType === 'resourcepack'
-			? 'texture-packs'
-			: projectType === 'shader'
-				? 'shaders'
-				: projectType === 'datapack'
-					? 'data-packs'
-					: 'mc-mods'
+				? 'texture-packs'
+				: projectType === 'shader'
+					? 'shaders'
+					: projectType === 'datapack'
+						? 'data-packs'
+						: 'mc-mods'
 	return `https://www.curseforge.com/minecraft/${section}/${slug}`
 }
 
@@ -142,10 +142,32 @@ export interface CurseForgeSearchResult {
 	page_size: number
 }
 
+/** Файл, який автор заборонив качати стороннім лаунчерам і якого нема на Modrinth */
+export interface CurseForgeBlockedFile {
+	mod_id: number
+	file_id: number
+	name: string
+	file_name: string
+	class_id?: number | null
+	/** Сторінка завантаження на CurseForge — відкривається в браузері */
+	page_url: string
+	sha1?: string | null
+	size: number
+}
+
+export interface CurseForgeFoundFile {
+	file_id: number
+	path: string
+}
+
 export interface CurseForgeInstallResult {
 	installed: string[]
 	skipped: string[]
 	failed: string[]
+	/** Треба докачати вручну зі сторінки CurseForge */
+	blocked: CurseForgeBlockedFile[]
+	/** Взято з Modrinth за назвою (той самий мод, інший файл) */
+	substituted: string[]
 }
 
 // --- команди
@@ -201,16 +223,48 @@ export interface CurseForgeModpackPrepared {
 	game_version: string
 	loader?: string | null
 	file_count: number
-	/** Моди, для яких автор заборонив сторонні завантаження — збірка без них */
+	/** Моди, яких у збірці не буде (заборонені автором і не знайдені на Modrinth) */
 	missing: string[]
+	/** Ті самі, але з даними для ручного завантаження */
+	blocked: CurseForgeBlockedFile[]
+	/** Взято з Modrinth за назвою (той самий мод, інший файл) */
+	substituted: string[]
 	icon_path?: string | null
 }
 
 /** Збірка CF → .mrpack у кеші лаунчера (далі — звичайна установка збірки) */
 export function terrarium_curseforge_prepare_modpack(modId: number, fileId?: number | null) {
-	return invoke<CurseForgeModpackPrepared>('plugin:terrarium|terrarium_curseforge_prepare_modpack', {
-		modId,
-		fileId: fileId ?? null,
+	return invoke<CurseForgeModpackPrepared>(
+		'plugin:terrarium|terrarium_curseforge_prepare_modpack',
+		{
+			modId,
+			fileId: fileId ?? null,
+		},
+	)
+}
+
+/** Тека «Завантаження», за якою стежить вікно заблокованих файлів */
+export function terrarium_curseforge_downloads_dir() {
+	return invoke<string | null>('plugin:terrarium|terrarium_curseforge_downloads_dir')
+}
+
+/** Які з очікуваних файлів уже лежать у «Завантаженнях» (звірка за sha1) */
+export function terrarium_curseforge_scan_downloads(files: CurseForgeBlockedFile[]) {
+	return invoke<CurseForgeFoundFile[]>('plugin:terrarium|terrarium_curseforge_scan_downloads', {
+		files,
+	})
+}
+
+/** Покласти вручну завантажений файл у примірник */
+export function terrarium_curseforge_import_blocked(
+	instanceId: string,
+	file: CurseForgeBlockedFile,
+	path: string,
+) {
+	return invoke<string>('plugin:terrarium|terrarium_curseforge_import_blocked', {
+		instanceId,
+		file,
+		path,
 	})
 }
 

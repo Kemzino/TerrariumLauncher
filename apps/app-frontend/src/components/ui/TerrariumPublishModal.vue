@@ -28,11 +28,14 @@ import { useRouter } from 'vue-router'
 
 import { get_project_many } from '@/helpers/cache.js'
 import {
+	compareTags,
+	newestTag,
 	type PackKind,
 	type PublishCandidate,
 	type PublishedRelease,
 	type PublishPreview,
 	suggestNextTag,
+	terrarium_list_releases,
 	terrarium_publish_preview,
 	terrarium_publish_release,
 } from '@/helpers/terrarium'
@@ -271,7 +274,10 @@ async function show(
 		const result = await terrarium_publish_preview(targetPack, targetInstanceId)
 		preview.value = result
 		// Наступний тег — після найновішого релізу (включно з тестовим)
-		if (result.release_tag) tag.value = suggestNextTag(result.release_tag)
+		if (result.release_tag) {
+			tag.value = suggestNextTag(result.release_tag)
+			void bumpPastNewestRelease(targetPack, tag.value)
+		}
 		const first = !result.release_tag
 		const initial: Record<string, boolean> = {}
 		for (const c of result.candidates) {
@@ -291,6 +297,23 @@ async function show(
 	} finally {
 		loading.value = false
 	}
+}
+
+// Після відкату актуальний реліз — старіший, і тег «після нього» вже зайнятий новішим
+// релізом (GitHub відхилить публікацію). Тож дивимось на всі релізи обох каналів.
+async function bumpPastNewestRelease(targetPack: PackKind, suggested: string) {
+	const lists = await Promise.all(
+		(['stable', 'test'] as const).map((channel) =>
+			terrarium_list_releases(targetPack, channel, 50).catch(() => []),
+		),
+	)
+	const newest = newestTag(lists.flat().map((entry) => entry.tag))
+	if (!newest || compareTags(newest, suggested) < 0) return
+	// Адмін міг уже вписати свій тег чи відкрити іншу збірку — тоді не чіпаємо
+	if (tag.value !== suggested || pack.value !== targetPack) return
+	const next = suggestNextTag(newest)
+	if (name.value.endsWith(suggested)) name.value = name.value.slice(0, -suggested.length) + next
+	tag.value = next
 }
 
 type Kind = 'new' | 'changed' | 'unchanged' | 'excluded'

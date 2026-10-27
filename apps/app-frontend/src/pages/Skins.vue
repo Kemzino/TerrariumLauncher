@@ -202,7 +202,8 @@ const messages = defineMessages({
 	},
 	offlineAccountDescription: {
 		id: 'app.skins.offline-account.description',
-		defaultMessage: 'Sign in with a Microsoft account to choose and apply skins.',
+		defaultMessage:
+			'Skins need a licensed Minecraft account. Sign in with Microsoft to choose and apply skins.',
 	},
 	signInButton: {
 		id: 'app.skins.sign-in.button',
@@ -1094,7 +1095,33 @@ await loadSkins()
 		@proceed="deleteSkin"
 	/>
 
-	<div class="skin-layout box-border grow p-4" :class="{ 'pb-40': !currentUser }">
+	<!-- Офлайн-акаунт не має профілю Mojang: скін йому не поставити, тож сторінку закрито -->
+	<div v-if="isOfflineAccount" class="box-border flex grow items-center justify-center p-4">
+		<div
+			class="flex w-full max-w-xl flex-col items-center gap-4 rounded-[20px] border border-solid border-surface-5 bg-surface-3 p-8 text-center"
+		>
+			<ShirtIcon class="size-12 text-secondary" />
+			<h1 class="m-0 text-2xl font-bold text-contrast">
+				{{ formatMessage(messages.offlineAccountTitle) }}
+			</h1>
+			<p class="m-0 text-base leading-6 text-primary">
+				{{ formatMessage(messages.offlineAccountDescription) }}
+			</p>
+			<Button
+				v-if="accountsCard"
+				type="colored"
+				color="brand"
+				:disabled="accountsCard.loginDisabled"
+				@click="login"
+			>
+				<SpinnerIcon v-if="accountsCard.loginDisabled" class="animate-spin" />
+				<WindowsIcon v-else />
+				{{ formatMessage(messages.signInButton) }}
+			</Button>
+		</div>
+	</div>
+
+	<div v-else class="skin-layout box-border grow p-4" :class="{ 'pb-40': !currentUser }">
 		<div class="sticky top-6 self-start p-2 pt-0">
 			<h1 class="m-0 text-2xl font-bold flex items-center gap-2">
 				{{ formatMessage(appMessages.skinSelectorLabel) }}
@@ -1280,7 +1307,7 @@ await loadSkins()
 		</div>
 	</div>
 
-	<div v-if="!currentUser || isOfflineAccount" class="sticky w-full bottom-0 z-20 p-4 pt-0">
+	<div v-if="!currentUser" class="sticky w-full bottom-0 z-20 p-4 pt-0">
 		<div
 			class="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 rounded-[20px] border border-solid border-surface-5 bg-surface-3 p-4"
 		>
@@ -1288,16 +1315,10 @@ await loadSkins()
 				<InfoIcon class="size-6 shrink-0 text-blue" />
 				<div class="flex min-w-0 flex-col gap-1">
 					<p class="m-0 text-lg font-semibold leading-6 text-contrast">
-						{{
-							formatMessage(isOfflineAccount ? messages.offlineAccountTitle : messages.demoTitle)
-						}}
+						{{ formatMessage(messages.demoTitle) }}
 					</p>
 					<p class="m-0 text-base leading-6 text-primary">
-						{{
-							formatMessage(
-								isOfflineAccount ? messages.offlineAccountDescription : messages.demoDescription,
-							)
-						}}
+						{{ formatMessage(messages.demoDescription) }}
 					</p>
 				</div>
 			</div>

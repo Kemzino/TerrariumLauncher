@@ -4,14 +4,14 @@ use crate::api::Result;
 use tauri::plugin::TauriPlugin;
 use theseus::terrarium::{
     self, AdminInfo, Channel, ContentGroup, PackKind, PublishPreview,
-    PublishRequest, PublishedRelease, TerrariumRelease, TerrariumState,
+    PublishRequest, PublishedRelease, TerrariumRelease,
+    TerrariumReleaseVersion, TerrariumState,
 };
 use theseus::terrarium_java::{self, GraalvmStatus};
 use theseus::terrarium_modrinth::{
     self, ModrinthAppInfo, ModrinthImportResult,
 };
 use theseus::terrarium_sync::{self, SyncPreview, SyncRequest, SyncResult};
-use theseus::terrarium_voxy::{self, VoxyStatus};
 
 pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
     tauri::plugin::Builder::new("terrarium")
@@ -34,6 +34,8 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             terrarium_set_mod_group,
             terrarium_set_mod_group_enabled,
             terrarium_promote_release,
+            terrarium_list_release_versions,
+            terrarium_set_latest_release,
             terrarium_sync_preview,
             terrarium_sync_apply,
             terrarium_detect_modrinth_app,
@@ -52,12 +54,11 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             terrarium_curseforge_search,
             terrarium_curseforge_install,
             terrarium_curseforge_prepare_modpack,
+            terrarium_curseforge_downloads_dir,
+            terrarium_curseforge_scan_downloads,
+            terrarium_curseforge_import_blocked,
             terrarium_graalvm_status,
             terrarium_set_graalvm,
-            terrarium_voxy_status,
-            terrarium_voxy_build,
-            terrarium_voxy_remove,
-            terrarium_voxy_cancel,
         ])
         .build()
 }
@@ -90,6 +91,34 @@ pub async fn terrarium_set_mod_group_enabled(
     enabled: bool,
 ) -> Result<()> {
     Ok(terrarium::set_mod_group_enabled(instance_id, name, enabled).await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_list_release_versions(
+    pack: PackKind,
+    channel: Option<Channel>,
+    limit: Option<u32>,
+) -> Result<Vec<TerrariumReleaseVersion>> {
+    Ok(terrarium::list_release_versions(
+        pack,
+        channel.unwrap_or_default(),
+        limit.unwrap_or(30),
+    )
+    .await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_set_latest_release(
+    pack: PackKind,
+    channel: Option<Channel>,
+    release_id: u64,
+) -> Result<TerrariumRelease> {
+    Ok(terrarium::set_latest_release(
+        pack,
+        channel.unwrap_or_default(),
+        release_id,
+    )
+    .await?)
 }
 
 #[tauri::command]
@@ -284,6 +313,33 @@ pub async fn terrarium_open_discord<R: tauri::Runtime>(
 /// Чи є ключ CurseForge API (з налаштувань або вбудований) — без нього
 /// моди не з Modrinth показуються без іконок і оновлень.
 #[tauri::command]
+pub async fn terrarium_curseforge_downloads_dir() -> Result<Option<String>> {
+    Ok(theseus::terrarium_curseforge::downloads_dir()
+        .map(|p| p.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+pub async fn terrarium_curseforge_scan_downloads(
+    files: Vec<theseus::terrarium_curseforge::CurseForgeBlockedFile>,
+) -> Result<Vec<theseus::terrarium_curseforge::CurseForgeFoundFile>> {
+    Ok(theseus::terrarium_curseforge::scan_downloads(files).await?)
+}
+
+#[tauri::command]
+pub async fn terrarium_curseforge_import_blocked(
+    instance_id: String,
+    file: theseus::terrarium_curseforge::CurseForgeBlockedFile,
+    path: String,
+) -> Result<String> {
+    Ok(theseus::terrarium_curseforge::import_blocked_file(
+        instance_id,
+        file,
+        path,
+    )
+    .await?)
+}
+
+#[tauri::command]
 pub async fn terrarium_curseforge_has_key() -> Result<bool> {
     Ok(theseus::terrarium_curseforge::has_api_key().await)
 }
@@ -462,24 +518,4 @@ pub async fn terrarium_set_graalvm(
     enabled: bool,
 ) -> Result<GraalvmStatus> {
     Ok(terrarium_java::set_enabled(&instance_id, enabled).await?)
-}
-
-#[tauri::command]
-pub async fn terrarium_voxy_status(instance_id: String) -> Result<VoxyStatus> {
-    Ok(terrarium_voxy::status(&instance_id).await?)
-}
-
-#[tauri::command]
-pub async fn terrarium_voxy_build(instance_id: String) -> Result<VoxyStatus> {
-    Ok(terrarium_voxy::build_and_install(&instance_id).await?)
-}
-
-#[tauri::command]
-pub async fn terrarium_voxy_remove(instance_id: String) -> Result<VoxyStatus> {
-    Ok(terrarium_voxy::remove(&instance_id).await?)
-}
-
-#[tauri::command]
-pub async fn terrarium_voxy_cancel() -> Result<bool> {
-    Ok(terrarium_voxy::cancel())
 }

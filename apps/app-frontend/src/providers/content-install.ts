@@ -35,6 +35,7 @@ import {
 	terrarium_curseforge_install,
 	terrarium_curseforge_prepare_modpack,
 } from '@/helpers/curseforge'
+import { showCurseForgeBlocked } from '@/helpers/curseforge-blocked'
 import {
 	install_create_instance,
 	install_create_modpack_instance,
@@ -629,13 +630,17 @@ export function createContentInstall(opts: {
 		versionId: string | null | undefined,
 	): Promise<{ versionId: string; installedProjectIds: string[] }> {
 		const meta = getCurseForgeMeta(project)!
-		const fileId = versionId && isCurseForgeVersionId(versionId) ? curseforgeFileId(versionId) : null
+		const fileId =
+			versionId && isCurseForgeVersionId(versionId) ? curseforgeFileId(versionId) : null
 		const result = await terrarium_curseforge_install(instanceId, meta.mod_id, fileId, true)
 		if (result.failed.length > 0) {
 			opts.handleError(
 				`Не вдалося поставити обов'язкові залежності: ${result.failed.join(', ')}. Постав їх вручну.`,
 			)
 		}
+		// Автор заборонив сторонні завантаження, а на Modrinth файлу нема — гравець
+		// докачує сам зі сторінки CurseForge, лаунчер підхоплює з «Завантажень»
+		showCurseForgeBlocked({ instanceId, files: result.blocked ?? [] })
 		return { versionId: versionId ?? curseforgeVersionId(0), installedProjectIds: [project.id] }
 	}
 
@@ -894,9 +899,11 @@ export function createContentInstall(opts: {
 				const fileId =
 					versionId && isCurseForgeVersionId(versionId) ? curseforgeFileId(versionId) : null
 				const prepared = await terrarium_curseforge_prepare_modpack(mod.id, fileId)
-				if (prepared.missing.length > 0) {
+				const blockedIds = new Set(prepared.blocked.map((b) => b.name))
+				const lost = prepared.missing.filter((name) => !blockedIds.has(name))
+				if (lost.length > 0) {
 					opts.handleError(
-						`Автори заборонили сторонні завантаження для: ${prepared.missing.join(', ')}. Збірка встановиться без них — додай їх вручну зі сторінок CurseForge.`,
+						`Цих файлів збірки немає ні на CurseForge, ні на Modrinth: ${lost.join(', ')}. Збірка встановиться без них.`,
 					)
 				}
 				const job = await install_create_modpack_instance(
@@ -904,7 +911,15 @@ export function createContentInstall(opts: {
 					{ name: prepared.name, iconPath: prepared.icon_path ?? null },
 				)
 				const newInstanceId = installJobInstanceId(job)
-				if (newInstanceId) createInstanceCallback(newInstanceId)
+				if (newInstanceId) {
+					createInstanceCallback(newInstanceId)
+					// Заборонені автором і відсутні на Modrinth — докачати вручну
+					showCurseForgeBlocked({
+						instanceId: newInstanceId,
+						jobId: job.job_id,
+						files: prepared.blocked,
+					})
+				}
 				trackEvent('PackInstall', {
 					id: cfProject.id,
 					version_id: versionId ?? null,
