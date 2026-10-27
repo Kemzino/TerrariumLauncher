@@ -14,7 +14,7 @@ use crate::State;
 use crate::state::instances::commands;
 pub use crate::state::instances::commands::ContentGroup;
 use crate::state::{EditInstance, InstanceLink};
-use crate::util::fetch::REQWEST_CLIENT;
+use crate::util::fetch::{NO_TIMEOUT_REQWEST_CLIENT, REQWEST_CLIENT};
 use crate::util::io;
 
 /// Репозиторій клієнтської збірки — те, що встановлюють гравці.
@@ -1005,7 +1005,8 @@ async fn upload_release_asset(
     bytes: Vec<u8>,
     token: &str,
 ) -> crate::Result<()> {
-    let response = REQWEST_CLIENT
+    // десятки МБ: зі звичайним клієнтом (read_timeout 30 с) завантаження обривалось і реліз лишався без файлу
+    let response = NO_TIMEOUT_REQWEST_CLIENT
         .post(format!(
             "https://uploads.github.com/repos/{repo}/releases/{release_id}/assets?name={}",
             urlencoding::encode(asset_name)
