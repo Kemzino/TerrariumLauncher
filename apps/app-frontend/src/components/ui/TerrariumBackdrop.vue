@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-
-import { windowHidden } from '@/composables/use-idle-animations'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 // Фонові фото збірки. Достатньо покласти файли в assets/terrarium/backgrounds —
 // Vite підхопить їх при збірці, нічого реєструвати не треба.
@@ -21,28 +19,17 @@ const next = computed(() => (current.value + 1) % images.length)
 
 let timer: ReturnType<typeof setInterval> | null = null
 
-function start() {
-	if (timer || images.length < 2) return
-	timer = setInterval(() => {
-		current.value = next.value
-	}, props.intervalMs)
-}
-
-function stop() {
-	if (timer) clearInterval(timer)
-	timer = null
-}
-
-// Кадр міняється, поки вікно видно. Раніше слайдшоу стояло й тоді, коли вікно просто
-// неактивне, а WebView2 часто вважає активне вікно неактивним — фон застигав на одному фото.
-// Дорогу частину (наїзд і плавний перехід) у неактивному вікні вимикає клас terrarium-idle
-// (global.scss): там кадр змінюється миттєво, без перемальовування щокадру.
 onMounted(() => {
-	if (!windowHidden.value) start()
+	if (images.length > 1) {
+		timer = setInterval(() => {
+			current.value = next.value
+		}, props.intervalMs)
+	}
 })
-watch(windowHidden, (hidden) => (hidden ? stop() : start()))
 
-onBeforeUnmount(stop)
+onBeforeUnmount(() => {
+	if (timer) clearInterval(timer)
+})
 </script>
 
 <template>
@@ -71,9 +58,8 @@ onBeforeUnmount(stop)
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
-	// Легкий «наїзд» камери під час зміни кадру. Між змінами фото стоїть: рух під
-	// панелями з backdrop-filter змушує перераховувати розмиття щокадру
-	animation: backdrop-zoom 2.4s ease-out forwards;
+	// Повільний «наїзд» камери, щоб фото не виглядало статичною картинкою
+	animation: backdrop-zoom 14s ease-out forwards;
 }
 
 .terrarium-backdrop__placeholder {
@@ -102,23 +88,13 @@ onBeforeUnmount(stop)
 	position: absolute;
 	inset: 0;
 	background:
-		linear-gradient(
-			180deg,
-			rgba(11, 21, 38, 0.15) 0%,
-			rgba(11, 21, 38, 0.55) 60%,
-			rgba(11, 21, 38, 0.85) 100%
-		),
+		linear-gradient(180deg, rgba(11, 21, 38, 0.15) 0%, rgba(11, 21, 38, 0.55) 60%, rgba(11, 21, 38, 0.85) 100%),
 		linear-gradient(90deg, rgba(11, 21, 38, 0.55) 0%, rgba(11, 21, 38, 0) 55%);
 }
 
 .light-mode .terrarium-backdrop__overlay {
 	background:
-		linear-gradient(
-			180deg,
-			rgba(223, 233, 247, 0.1) 0%,
-			rgba(223, 233, 247, 0.55) 60%,
-			rgba(223, 233, 247, 0.9) 100%
-		),
+		linear-gradient(180deg, rgba(223, 233, 247, 0.1) 0%, rgba(223, 233, 247, 0.55) 60%, rgba(223, 233, 247, 0.9) 100%),
 		linear-gradient(90deg, rgba(223, 233, 247, 0.5) 0%, rgba(223, 233, 247, 0) 55%);
 }
 
@@ -137,7 +113,7 @@ onBeforeUnmount(stop)
 		transform: scale(1);
 	}
 	to {
-		transform: scale(1.04);
+		transform: scale(1.08);
 	}
 }
 </style>

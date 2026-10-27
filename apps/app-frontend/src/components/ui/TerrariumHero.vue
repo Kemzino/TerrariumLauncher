@@ -35,7 +35,6 @@ import TerrariumPublishModal from '@/components/ui/TerrariumPublishModal.vue'
 import TerrariumReportsModal from '@/components/ui/TerrariumReportsModal.vue'
 import TerrariumServerStatusWidget from '@/components/ui/TerrariumServerStatusWidget.vue'
 import TerrariumSyncModal from '@/components/ui/TerrariumSyncModal.vue'
-import TerrariumVersionsModal from '@/components/ui/TerrariumVersionsModal.vue'
 import { useAppEvent } from '@/composables/use-app-event'
 import { useAppSettings } from '@/composables/use-app-settings'
 import { handleSevereError } from '@/composables/use-error.js'
@@ -131,11 +130,6 @@ const messages = defineMessages({
 	joinServerTooltip: {
 		id: 'terrarium.hero.join-server-tooltip',
 		defaultMessage: 'Запустити гру й одразу зайти на {address}',
-	},
-	versions: { id: 'terrarium.hero.versions', defaultMessage: 'Версії' },
-	versionsTooltip: {
-		id: 'terrarium.hero.versions-tooltip',
-		defaultMessage: 'Відкотити збірку на попередню версію',
 	},
 	playOld: { id: 'terrarium.hero.play-old', defaultMessage: 'Грати без оновлення' },
 	stop: { id: 'terrarium.hero.stop', defaultMessage: 'Зупинити' },
@@ -251,10 +245,6 @@ const installedTag = computed<string | null>(() => {
 })
 const publishModal = ref<InstanceType<typeof TerrariumPublishModal> | null>(null)
 const changelogModal = ref<InstanceType<typeof TerrariumChangelogModal> | null>(null)
-const versionsModal = ref<InstanceType<typeof TerrariumVersionsModal> | null>(null)
-function openVersions() {
-	versionsModal.value?.show()
-}
 // Непрочитаний список змін: останній реліз новіший за той, що гравець уже переглянув
 const changelogSeenTag = ref<string | null>(null)
 function readChangelogSeen() {
@@ -533,7 +523,7 @@ async function update() {
 }
 
 // Поставити конкретну версію в наявний примірник: оновлення до актуальної або відкат
-// на старішу (з вікна «Версії») — механізм той самий, пакет просто інший
+// на старішу (з вікна «Що нового») — механізм той самий, пакет просто інший
 async function installRelease(target: TerrariumRelease) {
 	if (!instance.value || busy.value || playing.value) return
 	const pack = activePack.value
@@ -577,6 +567,12 @@ async function play() {
 		busy.value = null
 	}
 }
+
+// «На сервер» біля онлайну сервера: лише клієнтська збірка, встановлена й оновлена (стара
+// версія сервером, найпевніше, не пройде) і не запущена
+const canJoinServer = computed(
+	() => !isServer.value && installed.value && !updateAvailable.value && !playing.value,
+)
 
 // Запуск зі входом на сервер (quick play: --quickPlayMultiplayer для 1.20+)
 async function joinServer() {
@@ -892,8 +888,9 @@ onMounted(async () => {
 						>
 							<PlayIcon /> {{ formatMessage(messages.play) }}
 						</Button>
+						<!-- зазвичай «На сервер» стоїть у блоці онлайну сервера; якщо той вимкнено в налаштуваннях — тут -->
 						<Button
-							v-if="!isServer"
+							v-if="canJoinServer && !showServerStatus"
 							v-tooltip="
 								formatMessage(messages.joinServerTooltip, { address: TERRARIUM_SERVER_ADDRESS })
 							"
@@ -908,15 +905,6 @@ onMounted(async () => {
 					<Button v-if="installed" size="xl" :disabled="!!busy" @click="openMods">
 						<PackageOpenIcon />
 						{{ isServer ? formatMessage(messages.modsServer) : formatMessage(messages.mods) }}
-					</Button>
-					<Button
-						v-if="installed"
-						v-tooltip="formatMessage(messages.versionsTooltip)"
-						size="xl"
-						:disabled="!!busy || playing"
-						@click="openVersions"
-					>
-						<UpdatedIcon /> {{ formatMessage(messages.versions) }}
 					</Button>
 					<Button
 						v-tooltip="changelogUnread ? formatMessage(messages.changelogUnread) : undefined"
@@ -1031,7 +1019,13 @@ onMounted(async () => {
 					</button>
 				</div>
 				<div class="terrarium-hero__panels">
-					<TerrariumServerStatusWidget v-if="showServerStatus" class="terrarium-hero__panel" />
+					<TerrariumServerStatusWidget
+						v-if="showServerStatus"
+						class="terrarium-hero__panel"
+						:can-join="canJoinServer"
+						:join-disabled="checking || !!busy"
+						@join="joinServer"
+					/>
 					<TerrariumNewsWidget v-if="showNews" class="terrarium-hero__panel" />
 					<aside class="terrarium-hero__account">
 						<h3 class="terrarium-hero__account-title">{{ formatMessage(messages.playingAs) }}</h3>
@@ -1054,15 +1048,9 @@ onMounted(async () => {
 			:pack="activePack"
 			:channel="activeChannel"
 			:installed-tag="installedTag"
-			@seen="(tag) => (changelogSeenTag = tag)"
-		/>
-		<TerrariumVersionsModal
-			ref="versionsModal"
-			:pack="activePack"
-			:channel="activeChannel"
-			:installed-tag="installedTag"
 			:is-admin="isAdmin"
 			:disabled="!!busy || playing"
+			@seen="(tag) => (changelogSeenTag = tag)"
 			@install="installRelease"
 			@latest-changed="onLatestChanged"
 		/>

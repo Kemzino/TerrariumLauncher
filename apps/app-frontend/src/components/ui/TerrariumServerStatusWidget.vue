@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RefreshCwIcon, UsersIcon } from '@modrinth/assets'
+import { RefreshCwIcon, ServerStackIcon, UsersIcon } from '@modrinth/assets'
 import { Button, defineMessages, useVIntl } from '@modrinth/ui'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
@@ -9,6 +9,13 @@ import { get_server_status, type ServerStatus } from '@/helpers/worlds'
 /** Раз на хвилину — сервер пінгується Server List Ping, як у списку серверів гри. */
 const REFRESH_MS = 60_000
 
+/** canJoin: показати «На сервер» (запуск гри одразу на сервер); joinDisabled: поки йде інша дія. */
+const props = withDefaults(defineProps<{ canJoin?: boolean; joinDisabled?: boolean }>(), {
+	canJoin: false,
+	joinDisabled: false,
+})
+const emit = defineEmits<{ join: [] }>()
+
 const { formatMessage } = useVIntl()
 
 const messages = defineMessages({
@@ -17,6 +24,11 @@ const messages = defineMessages({
 	offline: { id: 'terrarium.server-status.offline', defaultMessage: 'Сервер недоступний' },
 	ping: { id: 'terrarium.server-status.ping', defaultMessage: '{ping} мс' },
 	refresh: { id: 'terrarium.server-status.refresh', defaultMessage: 'Оновити' },
+	join: { id: 'terrarium.hero.join-server', defaultMessage: 'На сервер' },
+	joinTooltip: {
+		id: 'terrarium.hero.join-server-tooltip',
+		defaultMessage: 'Запустити гру й одразу зайти на {address}',
+	},
 })
 
 const status = ref<ServerStatus | null>(null)
@@ -48,7 +60,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<!-- Один рядок без заголовка: стан · онлайн · пінг · оновити -->
+	<!-- Один рядок без заголовка: стан · онлайн · пінг · на сервер · оновити -->
 	<section class="terrarium-widget terrarium-status">
 		<span
 			class="terrarium-status__dot"
@@ -75,6 +87,17 @@ onBeforeUnmount(() => {
 		<p v-else class="terrarium-status__text text-secondary">
 			{{ formatMessage(messages.offline) }}
 		</p>
+		<Button
+			v-if="props.canJoin"
+			v-tooltip="formatMessage(messages.joinTooltip, { address: TERRARIUM_SERVER_ADDRESS })"
+			type="colored"
+			color="brand"
+			size="sm"
+			:disabled="props.joinDisabled"
+			@click="emit('join')"
+		>
+			<ServerStackIcon /> {{ formatMessage(messages.join) }}
+		</Button>
 		<Button
 			v-tooltip="formatMessage(messages.refresh)"
 			type="transparent"

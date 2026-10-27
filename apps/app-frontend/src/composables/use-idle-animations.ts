@@ -15,7 +15,9 @@ const hidden = ref(typeof document !== 'undefined' && document.hidden)
 // Справжній стан нижче питаємо в Tauri.
 const focused = ref(true)
 
-const paused = computed(() => hidden.value || !focused.value)
+// лише коли вікна не видно: фокус у WebView2 ненадійний, і через нього карусель застигала
+// посеред наїзду, хоча гравець дивився на лаунчер
+const paused = computed(() => hidden.value)
 
 /** true, поки анімації мають стояти. */
 export const animationsPaused = readonly(paused)
