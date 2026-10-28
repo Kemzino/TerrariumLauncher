@@ -888,7 +888,7 @@ onMounted(async () => {
 						>
 							<PlayIcon /> {{ formatMessage(messages.play) }}
 						</Button>
-						<!-- зазвичай «На сервер» стоїть у блоці онлайну сервера; якщо той вимкнено в налаштуваннях — тут -->
+						<!-- онлайн сервера вимкнено в налаштуваннях — лишається сама кнопка «На сервер» -->
 						<Button
 							v-if="canJoinServer && !showServerStatus"
 							v-tooltip="
@@ -901,6 +901,14 @@ onMounted(async () => {
 							<ServerStackIcon /> {{ formatMessage(messages.joinServer) }}
 						</Button>
 					</template>
+					<!-- онлайн сервера біля «Грати»: стан і пінг, під ними «На сервер» -->
+					<TerrariumServerStatusWidget
+						v-if="showServerStatus"
+						class="terrarium-hero__panel"
+						:can-join="canJoinServer"
+						:join-disabled="checking || !!busy"
+						@join="joinServer"
+					/>
 
 					<Button v-if="installed" size="xl" :disabled="!!busy" @click="openMods">
 						<PackageOpenIcon />
@@ -1019,13 +1027,6 @@ onMounted(async () => {
 					</button>
 				</div>
 				<div class="terrarium-hero__panels">
-					<TerrariumServerStatusWidget
-						v-if="showServerStatus"
-						class="terrarium-hero__panel"
-						:can-join="canJoinServer"
-						:join-disabled="checking || !!busy"
-						@join="joinServer"
-					/>
 					<TerrariumNewsWidget v-if="showNews" class="terrarium-hero__panel" />
 					<aside class="terrarium-hero__account">
 						<h3 class="terrarium-hero__account-title">{{ formatMessage(messages.playingAs) }}</h3>

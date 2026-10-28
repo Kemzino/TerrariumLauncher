@@ -60,54 +60,56 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<!-- Один рядок без заголовка: стан · онлайн · пінг · на сервер · оновити -->
+	<!-- Блок біля «Грати»: зверху стан · онлайн · пінг · оновити, під ним «На сервер» -->
 	<section class="terrarium-widget terrarium-status">
-		<span
-			class="terrarium-status__dot"
-			:class="{ 'is-online': online === true, 'is-offline': online === false }"
-			aria-hidden="true"
-		/>
-		<p v-if="online === null" class="terrarium-status__text text-secondary">
-			{{ formatMessage(messages.checking) }}
-		</p>
-		<p v-else-if="online && status?.players" class="terrarium-status__text text-contrast">
-			<UsersIcon class="text-brand" />
-			<span class="truncate">
-				{{
-					formatMessage(messages.online, {
-						players: status.players.online,
-						max: status.players.max,
-					})
-				}}
-			</span>
-			<span v-if="status.ping !== undefined" class="terrarium-status__ping">
-				{{ formatMessage(messages.ping, { ping: status.ping }) }}
-			</span>
-		</p>
-		<p v-else class="terrarium-status__text text-secondary">
-			{{ formatMessage(messages.offline) }}
-		</p>
+		<div class="terrarium-status__row">
+			<span
+				class="terrarium-status__dot"
+				:class="{ 'is-online': online === true, 'is-offline': online === false }"
+				aria-hidden="true"
+			/>
+			<p v-if="online === null" class="terrarium-status__text text-secondary">
+				{{ formatMessage(messages.checking) }}
+			</p>
+			<p v-else-if="online && status?.players" class="terrarium-status__text text-contrast">
+				<UsersIcon class="text-brand" />
+				<span class="truncate">
+					{{
+						formatMessage(messages.online, {
+							players: status.players.online,
+							max: status.players.max,
+						})
+					}}
+				</span>
+				<span v-if="status.ping !== undefined" class="terrarium-status__ping">
+					{{ formatMessage(messages.ping, { ping: status.ping }) }}
+				</span>
+			</p>
+			<p v-else class="terrarium-status__text text-secondary">
+				{{ formatMessage(messages.offline) }}
+			</p>
+			<Button
+				v-tooltip="formatMessage(messages.refresh)"
+				type="transparent"
+				size="sm"
+				icon-only
+				:disabled="loading"
+				:aria-label="formatMessage(messages.refresh)"
+				@click="refresh"
+			>
+				<RefreshCwIcon :class="{ 'animate-spin': loading }" />
+			</Button>
+		</div>
 		<Button
 			v-if="props.canJoin"
 			v-tooltip="formatMessage(messages.joinTooltip, { address: TERRARIUM_SERVER_ADDRESS })"
 			type="colored"
 			color="brand"
-			size="sm"
+			class="terrarium-status__join"
 			:disabled="props.joinDisabled"
 			@click="emit('join')"
 		>
 			<ServerStackIcon /> {{ formatMessage(messages.join) }}
-		</Button>
-		<Button
-			v-tooltip="formatMessage(messages.refresh)"
-			type="transparent"
-			size="sm"
-			icon-only
-			:disabled="loading"
-			:aria-label="formatMessage(messages.refresh)"
-			@click="refresh"
-		>
-			<RefreshCwIcon :class="{ 'animate-spin': loading }" />
 		</Button>
 	</section>
 </template>
@@ -116,10 +118,21 @@ onBeforeUnmount(() => {
 @use './terrarium-widget' as *;
 
 .terrarium-status {
-	flex-direction: row;
+	gap: 0.35rem;
+	min-width: 15rem;
+	padding: 0.35rem 0.5rem 0.5rem;
+}
+
+.terrarium-status__row {
+	display: flex;
 	align-items: center;
 	gap: 0.6rem;
-	padding: 0.4rem 0.5rem 0.4rem 0.9rem;
+	padding-left: 0.4rem;
+}
+
+.terrarium-status__join {
+	width: 100%;
+	justify-content: center;
 }
 
 .terrarium-status__dot {

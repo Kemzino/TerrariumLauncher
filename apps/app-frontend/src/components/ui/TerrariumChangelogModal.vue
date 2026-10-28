@@ -17,7 +17,20 @@
 					class="rounded-xl border border-solid border-surface-5 bg-button-bg p-4"
 					:class="{ 'border-brand': entry.tag === installedTag }"
 				>
-					<header class="flex flex-wrap items-center gap-2">
+					<!-- опис розгорнуто лише в найновішого релізу, решта — по кліку на заголовок -->
+					<header
+						class="flex cursor-pointer select-none flex-wrap items-center gap-2"
+						role="button"
+						tabindex="0"
+						:aria-expanded="isExpanded(entry.tag)"
+						@click="toggle(entry.tag)"
+						@keydown.enter.prevent="toggle(entry.tag)"
+						@keydown.space.prevent="toggle(entry.tag)"
+					>
+						<ChevronRightIcon
+							class="shrink-0 text-secondary transition-transform"
+							:class="{ 'rotate-90': isExpanded(entry.tag) }"
+						/>
 						<h3 class="m-0 text-base font-semibold text-contrast">{{ entry.name }}</h3>
 						<span
 							class="rounded-full bg-surface-4 px-2 py-0.5 text-xs font-semibold text-secondary"
@@ -46,14 +59,16 @@
 							{{ formatDate(entry.published_at) }}
 						</span>
 					</header>
-					<div
-						v-if="entry.body.trim()"
-						class="markdown-body mt-2 text-sm"
-						v-html="renderString(entry.body)"
-					/>
-					<p v-else class="m-0 mt-2 text-sm text-secondary">
-						{{ formatMessage(messages.noBody) }}
-					</p>
+					<template v-if="isExpanded(entry.tag)">
+						<div
+							v-if="entry.body.trim()"
+							class="markdown-body mt-2 text-sm"
+							v-html="renderString(entry.body)"
+						/>
+						<p v-else class="m-0 mt-2 text-sm text-secondary">
+							{{ formatMessage(messages.noBody) }}
+						</p>
+					</template>
 					<!-- версія, яку можна поставити: собі, а адміну — ще й зробити актуальною для всіх -->
 					<footer v-if="versionOf(entry.tag)" class="mt-3 flex flex-wrap gap-2">
 						<Button :disabled="disabled || entry.tag === installedTag" @click="install(entry.tag)">
@@ -99,7 +114,14 @@
 // собі (напр. повернутись на попередню, якщо нова зламалась), а адмін може зробити старішу
 // актуальною для всіх (GitHub make_latest, нічого не видаляється). Непрочитані позначаються,
 // останній переглянутий тег зберігається локально.
-import { CheckIcon, DownloadIcon, ExternalIcon, GlobeIcon, SpinnerIcon } from '@modrinth/assets'
+import {
+	CheckIcon,
+	ChevronRightIcon,
+	DownloadIcon,
+	ExternalIcon,
+	GlobeIcon,
+	SpinnerIcon,
+} from '@modrinth/assets'
 import {
 	Button,
 	commonMessages,
@@ -187,6 +209,17 @@ const repoUrl = computed(() =>
 	entries.value[0]?.html_url.replace(/\/releases\/tag\/.*$/, '/releases'),
 )
 
+/** Розгорнуті описи; при відкритті — лише найновіший реліз */
+const expanded = ref(new Set<string>())
+function isExpanded(tag: string) {
+	return expanded.value.has(tag)
+}
+function toggle(tag: string) {
+	const next = new Set(expanded.value)
+	if (!next.delete(tag)) next.add(tag)
+	expanded.value = next
+}
+
 function versionOf(tag: string) {
 	return versions.value.get(tag)
 }
@@ -251,6 +284,7 @@ async function show() {
 			loadVersions(),
 		])
 		entries.value = list
+		expanded.value = new Set(list[0] ? [list[0].tag] : [])
 		// Переглянув — позначаємо найновіший як прочитаний
 		const latest = entries.value[0]?.tag
 		if (latest) {
