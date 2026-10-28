@@ -856,6 +856,12 @@ onMounted(async () => {
 				</p>
 			</div>
 
+			<!-- Окрема маленька панель над нижньою: нижче — бібліотека збірок, клік прокручує до неї -->
+			<button type="button" class="terrarium-hero__scroll-hint" @click="scrollToLibrary">
+				<span>{{ formatMessage(messages.scrollHint) }}</span>
+				<ChevronDownIcon />
+			</button>
+
 			<!-- Нижня панель: хто грає · яка збірка і в якому стані · кнопки запуску -->
 			<div class="terrarium-hero__dock">
 				<div class="terrarium-hero__account">
@@ -942,12 +948,6 @@ onMounted(async () => {
 						{{ formatMessage(messages.testHint) }}
 					</p>
 				</div>
-
-				<!-- Нижче головної — бібліотека збірок; клік прокручує до неї -->
-				<button type="button" class="terrarium-hero__scroll-hint" @click="scrollToLibrary">
-					<span>{{ formatMessage(messages.scrollHint) }}</span>
-					<ChevronDownIcon />
-				</button>
 
 				<div class="terrarium-hero__area terrarium-hero__area--play">
 					<template v-if="playing">
@@ -1125,27 +1125,33 @@ onMounted(async () => {
 	}
 }
 
-// На панелі між карткою збірки й кнопками, займає вільне місце й стоїть по центру
+// Окрема маленька скляна панель над нижньою, по центру всієї ширини
 .terrarium-hero__scroll-hint {
-	flex: 1 1 auto;
-	align-self: stretch;
-	justify-content: center;
-	padding: 0;
-	border: 0;
-	background: none;
+	grid-row: 3;
+	grid-column: 1 / -1;
+	justify-self: center;
+	align-self: end;
+	padding: 0.35rem 1rem 0.3rem;
+	border: 1px solid color-mix(in srgb, var(--color-contrast) 12%, transparent);
+	border-radius: 999px;
+	background: var(--terrarium-glass);
+	backdrop-filter: blur(14px);
 	font-family: inherit;
 	cursor: pointer;
-	transition: opacity 0.15s ease;
+	transition:
+		opacity 0.15s ease,
+		border-color 0.15s ease;
 
 	&:hover {
 		opacity: 1;
 		color: var(--color-contrast);
+		border-color: color-mix(in srgb, var(--color-contrast) 28%, transparent);
 	}
 
 	display: flex;
-	flex-direction: column;
+	flex-direction: row;
 	align-items: center;
-	gap: 0.1rem;
+	gap: 0.4rem;
 	font-size: 0.72rem;
 	font-weight: 600;
 	letter-spacing: 0.06em;
@@ -1191,10 +1197,11 @@ onMounted(async () => {
 	min-width: 0;
 }
 
-// Лого — посередині лівої частини по висоті
+// Лого — у нижній частині лівої колонки, ближче до панелі
 .terrarium-hero__area--brand {
 	grid-area: brand;
-	align-self: center;
+	align-self: end;
+	margin-bottom: 1.5rem;
 }
 
 .terrarium-hero__area--news {
@@ -1272,7 +1279,7 @@ onMounted(async () => {
 }
 
 .terrarium-hero__area--state {
-	flex: 0 1 auto;
+	flex: 1 1 auto;
 	padding-left: 1.25rem;
 	border-left: 1px solid color-mix(in srgb, var(--color-contrast) 12%, transparent);
 }
@@ -1297,9 +1304,9 @@ onMounted(async () => {
 
 .terrarium-hero__logo {
 	display: block;
-	// Рідний кадр — 600×384. Збільшуємо в 1,5 раза з різкими пікселями (pixelated, без
+	// Рідний кадр — 600×384. Збільшуємо в 1,25 раза з різкими пікселями (pixelated, без
 	// «мила»); на низькому вікні — менше, щоб лого не витісняло панель
-	width: min(100%, 56.25rem, calc((100vh - 24rem) * 1.5625));
+	width: min(100%, 46.875rem, calc((100vh - 24rem) * 1.5625));
 	height: auto;
 	image-rendering: pixelated;
 	// Тінь лише під кубом, щоб логотип не висів у повітрі; на прозорих
