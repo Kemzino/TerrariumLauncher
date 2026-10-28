@@ -30,6 +30,7 @@ import AccountsCard from '@/components/ui/AccountsCard.vue'
 import TerrariumBackdrop from '@/components/ui/TerrariumBackdrop.vue'
 import TerrariumChangelogModal from '@/components/ui/TerrariumChangelogModal.vue'
 import TerrariumInstancePicker from '@/components/ui/TerrariumInstancePicker.vue'
+import TerrariumLatestChanges from '@/components/ui/TerrariumLatestChanges.vue'
 import TerrariumNewsWidget from '@/components/ui/TerrariumNewsWidget.vue'
 import TerrariumPublishModal from '@/components/ui/TerrariumPublishModal.vue'
 import TerrariumReportsModal from '@/components/ui/TerrariumReportsModal.vue'
@@ -211,6 +212,57 @@ const isServer = computed(() => activePack.value === 'server')
 const appSettings = useAppSettings()
 const showNews = computed(() => appSettings.getFeatureFlag('terrarium_show_news'))
 const showServerStatus = computed(() => appSettings.getFeatureFlag('terrarium_show_server_status'))
+
+/**
+ * Розкладка головної. Блоки ті самі (бренд, стан збірки, сервер, кнопки, акаунт, новини,
+ * адмін-інструменти), різниться пріоритет. У dev-збірці перемикаються панеллю згори.
+ *  classic — класика: збірка й «Грати» зліва, сервер карткою над кнопками, новини справа
+ *  lobby   — сервер головний: велика картка з онлайном і «Грати на сервері», акаунт угорі
+ *  dock    — нижня панель як у Steam/Battle.net: акаунт · стан · сервер · «Грати» в один рядок
+ *  feed    — що нового: опис останнього релізу на пів екрана, запуск зліва
+ *  focus   — фокус: лого, одна велика кнопка й онлайн по центру, решта по кутах
+ */
+type HeroLayout = 'classic' | 'lobby' | 'dock' | 'feed' | 'focus'
+const HERO_LAYOUTS: { id: HeroLayout; label: string }[] = [
+	{ id: 'classic', label: '1 · Класика' },
+	{ id: 'lobby', label: '2 · Лобі сервера' },
+	{ id: 'dock', label: '3 · Нижня панель' },
+	{ id: 'feed', label: '4 · Що нового' },
+	{ id: 'focus', label: '5 · Фокус' },
+]
+const isDev = import.meta.env.DEV
+const heroLayout = ref<HeroLayout>(readHeroLayout())
+function readHeroLayout(): HeroLayout {
+	if (!isDev) return 'classic'
+	try {
+		const saved = localStorage.getItem('terrarium-hero-layout')
+		return HERO_LAYOUTS.some((l) => l.id === saved) ? (saved as HeroLayout) : 'classic'
+	} catch {
+		return 'classic'
+	}
+}
+function setHeroLayout(layout: HeroLayout) {
+	heroLayout.value = layout
+	try {
+		localStorage.setItem('terrarium-hero-layout', layout)
+	} catch {
+		/* не запам'ятаємо — не страшно */
+	}
+}
+/** Вигляд блоку сервера в кожній розкладці */
+const serverVariant = computed(() =>
+	heroLayout.value === 'lobby'
+		? 'lobby'
+		: heroLayout.value === 'dock' || heroLayout.value === 'focus'
+			? 'pill'
+			: 'card',
+)
+/** «На сервер» — окремою великою кнопкою в рядку дій (коли блок сервера — лише смужка) */
+const joinInActions = computed(() => !showServerStatus.value || serverVariant.value === 'pill')
+/** У «Лобі» головна кнопка — вхід на сервер у картці, а «Грати» стає другорядною */
+const serverFirst = computed(
+	() => heroLayout.value === 'lobby' && showServerStatus.value && !isServer.value,
+)
 const isTest = computed(() => activeChannel.value === 'test')
 // У тестовому каналі реліз може виявитись звичайним — тестових версій просто нема
 const hasTestRelease = computed(() => isTest.value && release.value?.prerelease === true)
@@ -737,8 +789,9 @@ onMounted(async () => {
 			</div>
 		</div>
 
-		<div class="terrarium-hero__content">
-			<div class="terrarium-hero__main">
+		<!-- Блоки головної на одній сітці; розкладка (heroLayout) лише розставляє їх по-різному -->
+		<div class="terrarium-hero__content" :class="`terrarium-hero__content--${heroLayout}`">
+			<div class="terrarium-hero__area terrarium-hero__area--brand">
 				<div class="terrarium-hero__badges">
 					<span class="terrarium-hero__eyebrow">
 						{{ isServer ? formatMessage(messages.eyebrowServer) : formatMessage(messages.eyebrow) }}
@@ -763,85 +816,223 @@ onMounted(async () => {
 				<p class="terrarium-hero__subtitle">
 					{{ isServer ? formatMessage(messages.subtitleServer) : formatMessage(messages.subtitle) }}
 				</p>
+			</div>
 
-				<p class="terrarium-hero__status">
-					<template v-if="checking">
-						<SpinnerIcon class="animate-spin" /> {{ formatMessage(messages.checking) }}
-					</template>
-					<template v-else-if="busyLabel">
-						<SpinnerIcon class="animate-spin" /> {{ busyLabel }}
-						<span v-if="installProgress?.text" class="terrarium-hero__muted">
-							· {{ installProgress.text }}
-						</span>
-					</template>
-					<template v-else-if="playing">
-						<PlayIcon class="text-brand" /> {{ formatMessage(messages.running) }}
-					</template>
-					<template v-else-if="!installed">
-						<PackageOpenIcon /> {{ formatMessage(messages.notInstalled) }}
-						<span v-if="release" class="terrarium-hero__muted">
-							· {{ formatMessage(messages.latestVersion, { tag: release.tag }) }}
-						</span>
-					</template>
-					<template v-else-if="updateAvailable">
-						<UpdatedIcon class="text-brand" />
-						{{ formatMessage(messages.latestVersion, { tag: release!.tag }) }}
-						<span class="terrarium-hero__muted">
-							· {{ formatMessage(messages.installedVersion, { tag: installedTag ?? '—' }) }}
-						</span>
-					</template>
-					<template v-else-if="!release">
-						<PackageOpenIcon class="text-orange" />
-						{{ formatMessage(messages.unknownLatest, { tag: installedTag ?? '—' }) }}
-					</template>
-					<template v-else>
-						<UpdatedIcon class="text-brand" /> {{ formatMessage(messages.upToDate) }}
-						<span v-if="installedTag" class="terrarium-hero__muted"> · {{ installedTag }} </span>
-					</template>
-				</p>
-				<div v-if="installProgress" class="terrarium-hero__bar" aria-hidden="true">
-					<div
-						class="terrarium-hero__bar-fill"
-						:class="{ 'is-indeterminate': installProgress.fraction === null }"
-						:style="
-							installProgress.fraction !== null
-								? { width: `${Math.round(installProgress.fraction * 100)}%` }
-								: {}
-						"
-					></div>
-				</div>
-				<p v-if="releaseError && !checking" class="terrarium-hero__hint">
-					{{
-						releaseError.includes('401')
-							? formatMessage(messages.keyRejectedHint)
-							: releaseError.includes('404')
-								? formatMessage(messages.noAccessHint)
-								: formatMessage(messages.offlineHint)
-					}}
-				</p>
-				<p
-					v-else-if="isTest && !checking && release && !release.prerelease"
-					class="terrarium-hero__hint"
+			<div
+				v-if="showNews && heroLayout !== 'focus'"
+				class="terrarium-hero__area terrarium-hero__area--news"
+			>
+				<TerrariumNewsWidget class="terrarium-hero__panel" />
+			</div>
+
+			<div v-if="heroLayout === 'feed'" class="terrarium-hero__area terrarium-hero__area--latest">
+				<TerrariumLatestChanges
+					class="terrarium-hero__panel"
+					:pack="activePack"
+					:channel="activeChannel"
+					:installed-tag="installedTag"
+					@open-all="openChangelog"
+				/>
+			</div>
+
+			<!-- Інструменти адміна окремо від кнопок гравця, щоб не плутались із «Грати» -->
+			<div v-if="isAdmin" class="terrarium-hero__area terrarium-hero__area--admin">
+				<span class="terrarium-hero__admin-label">{{ formatMessage(messages.adminBadge) }}</span>
+				<Button
+					v-tooltip="
+						reportsUnread > 0
+							? formatMessage(messages.reportsUnread, { count: reportsUnread })
+							: undefined
+					"
+					size="sm"
+					class="relative"
+					@click="openReports"
 				>
-					{{ formatMessage(messages.noTestRelease) }}
-				</p>
-				<p v-else-if="isTest && !checking" class="terrarium-hero__hint">
-					{{ formatMessage(messages.testHint) }}
-				</p>
+					<ReportIcon /> {{ formatMessage(messages.reports) }}
+					<span
+						v-if="reportsUnread > 0"
+						class="absolute -right-1 -top-1 size-2.5 rounded-full bg-orange ring-2 ring-[var(--color-raised-bg)]"
+						aria-hidden="true"
+					></span>
+				</Button>
+				<!-- Публікація — лише для клієнтської збірки: серверна на сервер із GitHub
+				     не підтягується, тож кнопка там лише вводила б в оману. -->
+				<Button
+					v-if="installed && !isServer"
+					v-tooltip="playing ? formatMessage(messages.publishWhilePlaying) : undefined"
+					size="sm"
+					:disabled="!!busy || playing"
+					@click="openPublish"
+				>
+					<RocketIcon /> {{ formatMessage(messages.publish) }}
+				</Button>
+				<Button
+					v-tooltip="
+						canSync ? formatMessage(messages.syncTooltip) : formatMessage(messages.syncNeedBoth)
+					"
+					size="sm"
+					:disabled="!!busy || playing || !canSync"
+					@click="openSync"
+				>
+					<ArrowLeftRightIcon /> {{ formatMessage(messages.sync) }}
+				</Button>
+				<Button
+					v-if="hasTestRelease"
+					size="sm"
+					:type="promoteArmed ? 'colored' : 'base'"
+					:color="promoteArmed ? 'orange' : undefined"
+					:disabled="!!busy || promoting"
+					@click="promote"
+				>
+					<SpinnerIcon v-if="promoting" class="animate-spin" />
+					<GlobeIcon v-else />
+					{{
+						promoting
+							? formatMessage(messages.promoting)
+							: promoteArmed
+								? formatMessage(messages.promoteConfirm)
+								: formatMessage(messages.promote)
+					}}
+				</Button>
+			</div>
 
-				<!-- Вибір примірника доступний усім: у гравця може бути кілька копій збірки
-				     (стара версія, свій примірник) — він сам обирає, яка «головна». -->
-				<div class="terrarium-hero__link">
-					<TerrariumInstancePicker
-						:instances="linkableInstances"
-						:current="instance"
-						:disabled="!!busy || playing"
-						@select="linkExisting"
-						@unlink="unlinkInstance"
+			<div class="terrarium-hero__area terrarium-hero__area--foot">
+				<div class="terrarium-hero__social">
+					<button
+						v-tooltip="formatMessage(messages.linkDiscord)"
+						type="button"
+						class="terrarium-hero__social-btn terrarium-hero__social-btn--discord"
+						:aria-label="formatMessage(messages.linkDiscord)"
+						@click="openTerrariumLink('discord')"
+					>
+						<DiscordIcon />
+					</button>
+					<button
+						v-tooltip="formatMessage(messages.linkRules)"
+						type="button"
+						class="terrarium-hero__social-btn"
+						:aria-label="formatMessage(messages.linkRules)"
+						@click="openTerrariumLink('rules')"
+					>
+						<BookOpenIcon />
+					</button>
+					<button
+						v-tooltip="formatMessage(messages.linkGithub)"
+						type="button"
+						class="terrarium-hero__social-btn"
+						:aria-label="formatMessage(messages.linkGithub)"
+						@click="openTerrariumLink('github')"
+					>
+						<GithubIcon />
+					</button>
+				</div>
+				<p class="terrarium-hero__powered">
+					<span>Launcher powered by</span>
+					<ModrinthIcon class="terrarium-hero__powered-icon" />
+					<span>Modrinth</span>
+				</p>
+			</div>
+
+			<!-- Усе, що потрібно для запуску. У «Нижній панелі» — один скляний рядок,
+			     в інших розкладках обгортка прозора (display: contents) -->
+			<div class="terrarium-hero__cluster">
+				<aside class="terrarium-hero__area terrarium-hero__area--account terrarium-hero__account">
+					<h3 class="terrarium-hero__account-title">{{ formatMessage(messages.playingAs) }}</h3>
+					<Suspense>
+						<AccountsCard />
+					</Suspense>
+				</aside>
+
+				<div class="terrarium-hero__area terrarium-hero__area--state">
+					<p class="terrarium-hero__status">
+						<template v-if="checking">
+							<SpinnerIcon class="animate-spin" /> {{ formatMessage(messages.checking) }}
+						</template>
+						<template v-else-if="busyLabel">
+							<SpinnerIcon class="animate-spin" /> {{ busyLabel }}
+							<span v-if="installProgress?.text" class="terrarium-hero__muted">
+								· {{ installProgress.text }}
+							</span>
+						</template>
+						<template v-else-if="playing">
+							<PlayIcon class="text-brand" /> {{ formatMessage(messages.running) }}
+						</template>
+						<template v-else-if="!installed">
+							<PackageOpenIcon /> {{ formatMessage(messages.notInstalled) }}
+							<span v-if="release" class="terrarium-hero__muted">
+								· {{ formatMessage(messages.latestVersion, { tag: release.tag }) }}
+							</span>
+						</template>
+						<template v-else-if="updateAvailable">
+							<UpdatedIcon class="text-brand" />
+							{{ formatMessage(messages.latestVersion, { tag: release!.tag }) }}
+							<span class="terrarium-hero__muted">
+								· {{ formatMessage(messages.installedVersion, { tag: installedTag ?? '—' }) }}
+							</span>
+						</template>
+						<template v-else-if="!release">
+							<PackageOpenIcon class="text-orange" />
+							{{ formatMessage(messages.unknownLatest, { tag: installedTag ?? '—' }) }}
+						</template>
+						<template v-else>
+							<UpdatedIcon class="text-brand" /> {{ formatMessage(messages.upToDate) }}
+							<span v-if="installedTag" class="terrarium-hero__muted"> · {{ installedTag }} </span>
+						</template>
+					</p>
+					<div v-if="installProgress" class="terrarium-hero__bar" aria-hidden="true">
+						<div
+							class="terrarium-hero__bar-fill"
+							:class="{ 'is-indeterminate': installProgress.fraction === null }"
+							:style="
+								installProgress.fraction !== null
+									? { width: `${Math.round(installProgress.fraction * 100)}%` }
+									: {}
+							"
+						></div>
+					</div>
+					<p v-if="releaseError && !checking" class="terrarium-hero__hint">
+						{{
+							releaseError.includes('401')
+								? formatMessage(messages.keyRejectedHint)
+								: releaseError.includes('404')
+									? formatMessage(messages.noAccessHint)
+									: formatMessage(messages.offlineHint)
+						}}
+					</p>
+					<p
+						v-else-if="isTest && !checking && release && !release.prerelease"
+						class="terrarium-hero__hint"
+					>
+						{{ formatMessage(messages.noTestRelease) }}
+					</p>
+					<p v-else-if="isTest && !checking" class="terrarium-hero__hint">
+						{{ formatMessage(messages.testHint) }}
+					</p>
+
+					<!-- Вибір примірника доступний усім: у гравця може бути кілька копій збірки
+					     (стара версія, свій примірник) — він сам обирає, яка «головна». -->
+					<div class="terrarium-hero__link">
+						<TerrariumInstancePicker
+							:instances="linkableInstances"
+							:current="instance"
+							:disabled="!!busy || playing"
+							@select="linkExisting"
+							@unlink="unlinkInstance"
+						/>
+					</div>
+				</div>
+
+				<div v-if="showServerStatus" class="terrarium-hero__area terrarium-hero__area--server">
+					<TerrariumServerStatusWidget
+						:class="{ 'terrarium-hero__panel': serverVariant !== 'pill' }"
+						:variant="serverVariant"
+						:can-join="canJoinServer"
+						:join-disabled="checking || !!busy"
+						@join="joinServer"
 					/>
 				</div>
 
-				<div class="terrarium-hero__actions">
+				<div class="terrarium-hero__area terrarium-hero__area--play terrarium-hero__actions">
 					<template v-if="playing">
 						<Button type="colored" color="red" size="xl" @click="stop">
 							<StopCircleIcon /> {{ formatMessage(messages.stop) }}
@@ -879,18 +1070,17 @@ onMounted(async () => {
 					</template>
 					<template v-else>
 						<Button
-							type="colored"
-							color="brand"
+							:type="serverFirst && canJoinServer ? 'base' : 'colored'"
+							:color="serverFirst && canJoinServer ? undefined : 'brand'"
 							size="xl"
-							class="terrarium-hero__cta"
+							:class="{ 'terrarium-hero__cta': !(serverFirst && canJoinServer) }"
 							:disabled="checking || !!busy"
 							@click="play"
 						>
 							<PlayIcon /> {{ formatMessage(messages.play) }}
 						</Button>
-						<!-- онлайн сервера вимкнено в налаштуваннях — лишається сама кнопка «На сервер» -->
 						<Button
-							v-if="canJoinServer && !showServerStatus"
+							v-if="canJoinServer && joinInActions"
 							v-tooltip="
 								formatMessage(messages.joinServerTooltip, { address: TERRARIUM_SERVER_ADDRESS })
 							"
@@ -901,141 +1091,42 @@ onMounted(async () => {
 							<ServerStackIcon /> {{ formatMessage(messages.joinServer) }}
 						</Button>
 					</template>
-					<!-- онлайн сервера біля «Грати»: стан і пінг, під ними «На сервер» -->
-					<TerrariumServerStatusWidget
-						v-if="showServerStatus"
-						class="terrarium-hero__panel"
-						:can-join="canJoinServer"
-						:join-disabled="checking || !!busy"
-						@join="joinServer"
-					/>
 
-					<Button v-if="installed" size="xl" :disabled="!!busy" @click="openMods">
-						<PackageOpenIcon />
-						{{ isServer ? formatMessage(messages.modsServer) : formatMessage(messages.mods) }}
-					</Button>
-					<Button
-						v-tooltip="changelogUnread ? formatMessage(messages.changelogUnread) : undefined"
-						size="xl"
-						class="relative"
-						@click="openChangelog"
-					>
-						<HistoryIcon /> {{ formatMessage(messages.changelog) }}
-						<span
-							v-if="changelogUnread"
-							class="absolute -right-1 -top-1 size-3 rounded-full bg-orange ring-2 ring-[var(--color-raised-bg)]"
-							aria-hidden="true"
-						></span>
-					</Button>
-					<Button
-						v-if="isAdmin"
-						v-tooltip="
-							reportsUnread > 0
-								? formatMessage(messages.reportsUnread, { count: reportsUnread })
-								: undefined
-						"
-						size="xl"
-						class="relative"
-						@click="openReports"
-					>
-						<ReportIcon /> {{ formatMessage(messages.reports) }}
-						<span
-							v-if="reportsUnread > 0"
-							class="absolute -right-1 -top-1 size-3 rounded-full bg-orange ring-2 ring-[var(--color-raised-bg)]"
-							aria-hidden="true"
-						></span>
-					</Button>
-					<!-- Публікація — лише для клієнтської збірки: серверна на сервер із GitHub
-					     не підтягується, тож кнопка там лише вводила б в оману. -->
-					<Button
-						v-if="isAdmin && installed && !isServer"
-						v-tooltip="playing ? formatMessage(messages.publishWhilePlaying) : undefined"
-						size="xl"
-						:type="isServer && !updateAvailable ? 'colored' : 'base'"
-						:color="isServer && !updateAvailable ? 'brand' : undefined"
-						:disabled="!!busy || playing"
-						@click="openPublish"
-					>
-						<RocketIcon /> {{ formatMessage(messages.publish) }}
-					</Button>
-					<Button
-						v-if="isAdmin"
-						v-tooltip="
-							canSync ? formatMessage(messages.syncTooltip) : formatMessage(messages.syncNeedBoth)
-						"
-						size="xl"
-						:disabled="!!busy || playing || !canSync"
-						@click="openSync"
-					>
-						<ArrowLeftRightIcon /> {{ formatMessage(messages.sync) }}
-					</Button>
-					<Button
-						v-if="isAdmin && hasTestRelease"
-						size="xl"
-						:type="promoteArmed ? 'colored' : 'base'"
-						:color="promoteArmed ? 'orange' : undefined"
-						:disabled="!!busy || promoting"
-						@click="promote"
-					>
-						<SpinnerIcon v-if="promoting" class="animate-spin" />
-						<GlobeIcon v-else />
-						{{
-							promoting
-								? formatMessage(messages.promoting)
-								: promoteArmed
-									? formatMessage(messages.promoteConfirm)
-									: formatMessage(messages.promote)
-						}}
-					</Button>
-				</div>
-
-				<p class="terrarium-hero__powered">
-					<span>Launcher powered by</span>
-					<ModrinthIcon class="terrarium-hero__powered-icon" />
-					<span>Modrinth</span>
-				</p>
-			</div>
-
-			<div class="terrarium-hero__side">
-				<div class="terrarium-hero__social">
-					<button
-						v-tooltip="formatMessage(messages.linkDiscord)"
-						type="button"
-						class="terrarium-hero__social-btn terrarium-hero__social-btn--discord"
-						:aria-label="formatMessage(messages.linkDiscord)"
-						@click="openTerrariumLink('discord')"
-					>
-						<DiscordIcon />
-					</button>
-					<button
-						v-tooltip="formatMessage(messages.linkRules)"
-						type="button"
-						class="terrarium-hero__social-btn"
-						:aria-label="formatMessage(messages.linkRules)"
-						@click="openTerrariumLink('rules')"
-					>
-						<BookOpenIcon />
-					</button>
-					<button
-						v-tooltip="formatMessage(messages.linkGithub)"
-						type="button"
-						class="terrarium-hero__social-btn"
-						:aria-label="formatMessage(messages.linkGithub)"
-						@click="openTerrariumLink('github')"
-					>
-						<GithubIcon />
-					</button>
-				</div>
-				<div class="terrarium-hero__panels">
-					<TerrariumNewsWidget v-if="showNews" class="terrarium-hero__panel" />
-					<aside class="terrarium-hero__account">
-						<h3 class="terrarium-hero__account-title">{{ formatMessage(messages.playingAs) }}</h3>
-						<Suspense>
-							<AccountsCard />
-						</Suspense>
-					</aside>
+					<span class="terrarium-hero__more">
+						<Button v-if="installed" size="lg" :disabled="!!busy" @click="openMods">
+							<PackageOpenIcon />
+							{{ isServer ? formatMessage(messages.modsServer) : formatMessage(messages.mods) }}
+						</Button>
+						<Button
+							v-if="heroLayout !== 'feed'"
+							v-tooltip="changelogUnread ? formatMessage(messages.changelogUnread) : undefined"
+							size="lg"
+							class="relative"
+							@click="openChangelog"
+						>
+							<HistoryIcon /> {{ formatMessage(messages.changelog) }}
+							<span
+								v-if="changelogUnread"
+								class="absolute -right-1 -top-1 size-3 rounded-full bg-orange ring-2 ring-[var(--color-raised-bg)]"
+								aria-hidden="true"
+							></span>
+						</Button>
+					</span>
 				</div>
 			</div>
+		</div>
+
+		<!-- лише dev: перемикач розкладок головної, щоб порівняти їх наживо -->
+		<div v-if="isDev" class="terrarium-hero__layouts">
+			<button
+				v-for="layout in HERO_LAYOUTS"
+				:key="layout.id"
+				type="button"
+				:class="{ active: heroLayout === layout.id }"
+				@click="setHeroLayout(layout.id)"
+			>
+				{{ layout.label }}
+			</button>
 		</div>
 
 		<div class="terrarium-hero__scroll-hint" aria-hidden="true">
@@ -1188,10 +1279,280 @@ onMounted(async () => {
 	z-index: 1;
 	width: 100%;
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) auto;
-	align-items: end;
-	gap: 2rem;
-	padding: 3rem 3.5rem 3rem;
+	gap: 0.9rem 2rem;
+	padding: 4.25rem 3.5rem 2.75rem;
+}
+
+.terrarium-hero__area {
+	min-width: 0;
+}
+
+// Обгортка блоків запуску: прозора для сітки, крім «Нижньої панелі»
+.terrarium-hero__cluster {
+	display: contents;
+}
+
+.terrarium-hero__area--brand {
+	grid-area: brand;
+	align-self: end;
+}
+.terrarium-hero__area--news {
+	grid-area: news;
+	display: flex;
+	flex-direction: column;
+	justify-content: flex-end;
+	// На всю висоту своєї частини сітки, але без внеску в неї: інакше довгий список
+	// новин розтягнув би головну. Новини скролять усередині.
+	height: 0;
+	min-height: 100%;
+
+	> :deep(.terrarium-news) {
+		flex: 0 1 auto;
+		min-height: 0;
+	}
+}
+.terrarium-hero__area--latest {
+	grid-area: latest;
+	display: flex;
+	flex-direction: column;
+	height: 0;
+	min-height: 100%;
+
+	> * {
+		flex: 1 1 auto;
+		min-height: 0;
+	}
+}
+.terrarium-hero__area--admin {
+	grid-area: admin;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.4rem;
+}
+.terrarium-hero__area--foot {
+	grid-area: foot;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 1rem;
+}
+.terrarium-hero__area--account {
+	grid-area: account;
+	align-self: end;
+}
+.terrarium-hero__area--state {
+	grid-area: state;
+}
+.terrarium-hero__area--server {
+	grid-area: server;
+	align-self: end;
+}
+.terrarium-hero__area--play {
+	grid-area: play;
+}
+
+.terrarium-hero__admin-label {
+	margin-right: 0.25rem;
+	font-size: 0.7rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--terrarium-yellow);
+}
+
+// Другорядні кнопки гравця — поруч із головною, але дрібніші
+.terrarium-hero__more {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
+/* ── 1 · Класика: збірка зліва, сервер карткою над «Грати», новини й акаунт справа ── */
+.terrarium-hero__content--classic {
+	grid-template-columns: minmax(0, 1fr) 300px;
+	grid-template-rows: 1fr auto auto auto auto auto;
+	grid-template-areas:
+		'brand  news'
+		'state  news'
+		'server news'
+		'play   news'
+		'admin  account'
+		'foot   account';
+
+	.terrarium-hero__area--server {
+		justify-self: start;
+	}
+}
+
+/* ── 2 · Лобі: сервер — головне. Велика картка з онлайном і входом, акаунт угорі ── */
+.terrarium-hero__content--lobby {
+	grid-template-columns: minmax(0, 1fr) 300px;
+	grid-template-rows: auto 1fr auto auto auto auto auto;
+	grid-template-areas:
+		'brand  account'
+		'brand  news'
+		'server news'
+		'state  news'
+		'play   news'
+		'admin  news'
+		'foot   news';
+
+	.terrarium-hero__area--account {
+		align-self: start;
+	}
+	.terrarium-hero__area--server {
+		width: min(100%, 30rem);
+	}
+	.terrarium-hero__logo {
+		width: min(100%, 26rem);
+	}
+}
+
+/* ── 3 · Нижня панель: усе для запуску в одному скляному рядку внизу ── */
+.terrarium-hero__content--dock {
+	grid-template-columns: minmax(0, 1fr) 300px;
+	grid-template-rows: 1fr auto auto auto;
+	grid-template-areas:
+		'brand news'
+		'admin news'
+		'dock  dock'
+		'foot  foot';
+
+	.terrarium-hero__cluster {
+		grid-area: dock;
+		display: flex;
+		align-items: center;
+		gap: 1.25rem;
+		padding: 0.85rem 1rem 0.85rem 1.25rem;
+		border-radius: var(--radius-lg);
+		background: var(--terrarium-glass);
+		border: 1px solid color-mix(in srgb, var(--color-contrast) 12%, transparent);
+		backdrop-filter: blur(14px);
+		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+	}
+	.terrarium-hero__account {
+		flex: 0 0 15rem;
+		padding: 0;
+		background: none;
+		border: 0;
+		box-shadow: none;
+		backdrop-filter: none;
+	}
+	.terrarium-hero__account-title {
+		display: none;
+	}
+	.terrarium-hero__area--state {
+		flex: 1 1 auto;
+		padding-left: 1.25rem;
+		border-left: 1px solid color-mix(in srgb, var(--color-contrast) 12%, transparent);
+	}
+	.terrarium-hero__link {
+		margin-top: 0.4rem;
+	}
+	.terrarium-hero__area--server {
+		align-self: center;
+	}
+	// «Грати» — у правому кінці панелі, як у Steam/Battle.net
+	.terrarium-hero__area--play {
+		order: 5;
+		flex-wrap: nowrap;
+		margin-top: 0;
+	}
+	.terrarium-hero__more {
+		order: -1;
+		flex-wrap: nowrap;
+	}
+	.terrarium-hero__area--foot .terrarium-hero__powered {
+		margin: 0;
+	}
+}
+
+/* ── 4 · Що нового: опис останнього релізу на пів екрана, запуск зліва ── */
+.terrarium-hero__content--feed {
+	grid-template-columns: minmax(20rem, 30rem) minmax(0, 1fr) 300px;
+	grid-template-rows: 1fr auto auto auto auto auto;
+	grid-template-areas:
+		'brand  latest news'
+		'state  latest news'
+		'server latest news'
+		'play   latest account'
+		'admin  latest account'
+		'foot   latest account';
+
+	.terrarium-hero__logo {
+		width: min(100%, 26rem);
+	}
+	.terrarium-hero__area--server {
+		justify-self: start;
+	}
+}
+
+/* ── 5 · Фокус: лого, одна велика кнопка й онлайн по центру, решта по кутах ── */
+.terrarium-hero__content--focus {
+	// знизу місце під підказку «Інші збірки — нижче»
+	padding-bottom: 4rem;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 46rem) minmax(0, 1fr);
+	grid-template-rows: 1fr auto auto auto auto 1fr auto;
+	grid-template-areas:
+		'.     .      .'
+		'.     brand  .'
+		'.     state  .'
+		'.     play   .'
+		'.     server .'
+		'.     .      .'
+		'foot  admin  account';
+
+	.terrarium-hero__area--brand,
+	.terrarium-hero__area--state,
+	.terrarium-hero__area--server {
+		justify-self: center;
+		text-align: center;
+	}
+	.terrarium-hero__badges,
+	.terrarium-hero__status,
+	.terrarium-hero__link,
+	.terrarium-hero__area--play,
+	.terrarium-hero__area--admin {
+		justify-content: center;
+	}
+	.terrarium-hero__logo {
+		margin: 0 auto;
+	}
+	.terrarium-hero__subtitle {
+		margin-inline: auto;
+	}
+	.terrarium-hero__bar {
+		margin-inline: auto;
+	}
+	.terrarium-hero__area--play {
+		margin-top: 0.75rem;
+	}
+	.terrarium-hero__more {
+		flex-basis: 100%;
+		justify-content: center;
+	}
+	.terrarium-hero__area--admin,
+	.terrarium-hero__area--foot {
+		align-self: end;
+	}
+	.terrarium-hero__area--account {
+		justify-self: end;
+	}
+}
+
+.terrarium-hero__area--foot {
+	.terrarium-hero__social {
+		flex-direction: row;
+		padding: 0;
+	}
+	.terrarium-hero__social-btn {
+		width: 2.1rem;
+		height: 2.1rem;
+	}
+	.terrarium-hero__powered {
+		margin: 0;
+	}
 }
 
 .terrarium-hero__eyebrow {
@@ -1310,22 +1671,38 @@ onMounted(async () => {
 	margin-top: 1.5rem;
 }
 
-.terrarium-hero__cta {
-	box-shadow: 0 8px 30px var(--color-brand-shadow);
+.terrarium-hero__layouts {
+	position: absolute;
+	top: 0.75rem;
+	left: 50%;
+	z-index: 5;
+	display: flex;
+	gap: 0.25rem;
+	padding: 0.25rem;
+	transform: translateX(-50%);
+	border-radius: 999px;
+	background: rgba(0, 0, 0, 0.6);
+	border: 1px dashed var(--color-orange);
+
+	button {
+		padding: 0.3rem 0.75rem;
+		border: 0;
+		border-radius: 999px;
+		background: transparent;
+		color: var(--color-contrast);
+		font-size: 0.8rem;
+		font-weight: 600;
+		cursor: pointer;
+
+		&.active {
+			background: var(--color-brand);
+			color: var(--color-accent-contrast);
+		}
+	}
 }
 
-.terrarium-hero__side {
-	display: flex;
-	align-items: flex-end;
-	justify-content: flex-end;
-	gap: 0.75rem;
-	// На всю висоту hero, але без внеску у неї: height: 0 — колонка не
-	// розтягує hero під довгий список новин, min-height: 100% — після
-	// розкладки займає всю висоту рядка сітки. Новини між сервером і акаунтом
-	// беруть решту місця і скролять усередині.
-	align-self: stretch;
-	height: 0;
-	min-height: 100%;
+.terrarium-hero__cta {
+	box-shadow: 0 8px 30px var(--color-brand-shadow);
 }
 
 .terrarium-hero__social {
@@ -1391,23 +1768,6 @@ onMounted(async () => {
 	color: var(--color-brand);
 }
 
-.terrarium-hero__panels {
-	display: flex;
-	flex-direction: column;
-	justify-content: flex-end;
-	gap: 0.75rem;
-	width: 300px;
-	align-self: stretch;
-	min-height: 0;
-}
-
-// Новини — єдиний гнучкий віджет колонки: тягнуться по висоті вікна,
-// а довгий список скролиться всередині (див. TerrariumNewsWidget)
-.terrarium-hero__panels > :deep(.terrarium-news) {
-	flex: 0 1 auto;
-	min-height: 0;
-}
-
 // Віджети в hero — у тому ж «скляному» стилі, що й картка акаунта
 .terrarium-hero__panel {
 	background: var(--terrarium-glass) !important;
@@ -1436,24 +1796,33 @@ onMounted(async () => {
 }
 
 @media (max-width: 960px) {
+	// Вузьке вікно: будь-яка розкладка — одна колонка в порядку важливості
 	.terrarium-hero__content {
-		grid-template-columns: 1fr;
-		padding: 2rem 1.5rem;
+		grid-template-columns: minmax(0, 1fr) !important;
+		grid-template-rows: none !important;
+		grid-template-areas:
+			'brand'
+			'state'
+			'server'
+			'play'
+			'dock'
+			'account'
+			'latest'
+			'news'
+			'admin'
+			'foot' !important;
+		padding: 4rem 1.5rem 2rem;
 	}
 
-	// В одну колонку розтягувати нема куди — новини знову фіксованої висоти
-	.terrarium-hero__side {
+	.terrarium-hero__area--news,
+	.terrarium-hero__area--latest {
 		height: auto;
 		min-height: 0;
+		max-height: 32rem;
 	}
 
-	.terrarium-hero__side,
-	.terrarium-hero__panels {
-		align-self: auto;
-	}
-
-	.terrarium-hero__panels > :deep(.terrarium-news) {
-		flex: none;
+	.terrarium-hero__content--dock .terrarium-hero__cluster {
+		flex-wrap: wrap;
 	}
 }
 </style>
