@@ -6,8 +6,8 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { getInstanceIconUrl } from '@/helpers/instance'
 import type { GameInstance } from '@/helpers/types'
 
-// Випадний список примірників для адміна: який примірник вважати збіркою.
-// Показує іконку, назву, завантажувач і версію; дозволяє відв'язати.
+// Картка збірки на головній: який примірник запуститься і (слот detail) у якому він стані —
+// версія, оновлення, прогрес. Клік відкриває список примірників: обрати інший або відв'язати.
 const props = defineProps<{
 	instances: GameInstance[]
 	current: GameInstance | undefined
@@ -74,20 +74,24 @@ function loaderLabel(i: GameInstance) {
 		<button type="button" class="instance-picker__chip" :disabled="disabled" @click="toggle">
 			<template v-if="current">
 				<Avatar
-					size="1.75rem"
+					size="2.5rem"
 					:src="getInstanceIconUrl(current.icon_path)"
 					:tint-by="current.id"
 					pad-transparent-corners
 					class="instance-picker__avatar"
 				/>
 				<span class="instance-picker__text">
-					<span class="instance-picker__label">{{ formatMessage(messages.linked) }}</span>
 					<span class="instance-picker__name">{{ current.name }}</span>
+					<span v-if="$slots.detail" class="instance-picker__detail"><slot name="detail" /></span>
+					<span v-else class="instance-picker__label">{{ formatMessage(messages.linked) }}</span>
 				</span>
 			</template>
 			<template v-else>
-				<LinkIcon class="instance-picker__icon" />
-				<span class="instance-picker__name">{{ formatMessage(messages.placeholder) }}</span>
+				<span class="instance-picker__placeholder"><LinkIcon class="instance-picker__icon" /></span>
+				<span class="instance-picker__text">
+					<span class="instance-picker__name">{{ formatMessage(messages.placeholder) }}</span>
+					<span v-if="$slots.detail" class="instance-picker__detail"><slot name="detail" /></span>
+				</span>
 			</template>
 			<ChevronDownIcon class="instance-picker__chevron" />
 		</button>
@@ -117,9 +121,7 @@ function loaderLabel(i: GameInstance) {
 						/>
 						<span class="instance-picker__text">
 							<span class="instance-picker__name">{{ i.name }}</span>
-							<span class="instance-picker__meta">
-								<BoxIcon /> {{ loaderLabel(i) }}
-							</span>
+							<span class="instance-picker__meta"> <BoxIcon /> {{ loaderLabel(i) }} </span>
 						</span>
 						<CheckIcon v-if="i.id === current?.id" class="instance-picker__check" />
 					</button>
@@ -145,10 +147,10 @@ function loaderLabel(i: GameInstance) {
 .instance-picker__chip {
 	display: inline-flex;
 	align-items: center;
-	gap: 0.6rem;
-	padding: 0.4rem 0.75rem 0.4rem 0.5rem;
+	gap: 0.75rem;
+	padding: 0.5rem 0.9rem 0.5rem 0.5rem;
 	border: 1px solid color-mix(in srgb, var(--color-contrast) 14%, transparent);
-	border-radius: 9999px;
+	border-radius: var(--radius-lg);
 	background: var(--terrarium-glass);
 	backdrop-filter: blur(10px);
 	color: var(--color-contrast);
@@ -175,11 +177,38 @@ function loaderLabel(i: GameInstance) {
 	border-radius: var(--radius-sm);
 }
 
+.instance-picker__placeholder {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	width: 2.5rem;
+	height: 2.5rem;
+	border-radius: var(--radius-sm);
+	background: color-mix(in srgb, var(--color-contrast) 8%, transparent);
+}
+
 .instance-picker__icon {
-	width: 1.1rem;
-	height: 1.1rem;
-	margin-left: 0.25rem;
+	width: 1.2rem;
+	height: 1.2rem;
 	color: var(--color-brand);
+}
+
+// Стан збірки під назвою: версія, оновлення, прогрес (іконки дрібніші за текст назви)
+.instance-picker__detail {
+	display: inline-flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.35rem;
+	margin-top: 0.15rem;
+	font-size: 0.8rem;
+	font-weight: 600;
+	color: var(--color-base);
+
+	:deep(svg) {
+		width: 0.95rem;
+		height: 0.95rem;
+	}
 }
 
 .instance-picker__text {
@@ -198,12 +227,12 @@ function loaderLabel(i: GameInstance) {
 }
 
 .instance-picker__name {
-	font-size: 0.9rem;
-	font-weight: 600;
+	font-size: 1rem;
+	font-weight: 700;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	max-width: 18rem;
+	max-width: 24rem;
 }
 
 .instance-picker__meta {

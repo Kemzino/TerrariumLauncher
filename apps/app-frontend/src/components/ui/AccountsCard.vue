@@ -36,7 +36,9 @@
 	</div>
 	<Accordion
 		v-else
-		class="w-full mt-2 bg-button-bg border border-solid border-surface-5 rounded-xl overflow-clip"
+		ref="accordion"
+		class="w-full bg-button-bg border border-solid border-surface-5 rounded-xl"
+		:class="props.popover ? 'accounts-card--popover' : 'mt-2 overflow-clip'"
 		button-class="button-base w-full bg-transparent px-3 py-2 border-0 cursor-pointer"
 		:open-by-default="false"
 	>
@@ -54,7 +56,9 @@
 					<span class="truncate w-full text-left">{{
 						selectedAccount ? selectedAccount.profile.name : formatMessage(messages.selectAccount)
 					}}</span>
-					<span class="text-secondary text-xs">{{ formatMessage(messages.minecraftAccount) }}</span>
+					<span class="text-secondary text-xs truncate w-full text-left">{{
+						formatMessage(messages.minecraftAccount)
+					}}</span>
 				</div>
 			</div>
 		</template>
@@ -160,7 +164,7 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import type { Ref } from 'vue'
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import { useAppEvent } from '@/composables/use-app-event'
 import { handleSevereError } from '@/composables/use-error.js'
@@ -183,6 +187,15 @@ const { handleError } = injectNotificationManager()
 const emit = defineEmits<{
 	change: []
 }>()
+
+/** popover: список акаунтів відкривається поверх (над карткою), а не розсуває сусідів — для нижньої панелі */
+const props = defineProps<{ popover?: boolean }>()
+const accordion = ref<InstanceType<typeof Accordion> | null>(null)
+function onDocumentDown(event: MouseEvent) {
+	const el = (accordion.value as unknown as { $el?: HTMLElement } | null)?.$el
+	if (props.popover && el && !el.contains(event.target as Node)) accordion.value?.close()
+}
+onMounted(() => document.addEventListener('mousedown', onDocumentDown))
 
 type MinecraftCredential = {
 	profile: {
@@ -211,6 +224,7 @@ async function updateHeadUrl(skin: Skin | null) {
 }
 
 onUnmounted(() => {
+	document.removeEventListener('mousedown', onDocumentDown)
 	headRequest++
 	if (equippedHeadUrl.value) URL.revokeObjectURL(equippedHeadUrl.value)
 })
@@ -381,3 +395,28 @@ const messages = defineMessages({
 	},
 })
 </script>
+
+<style scoped lang="scss">
+// Popover: картка лишається компактною, а список акаунтів випливає над нею
+.accounts-card--popover {
+	position: relative;
+
+	> :deep(.accordion-content) {
+		position: absolute;
+		z-index: 40;
+		left: 0;
+		bottom: calc(100% + 0.5rem);
+		width: max(100%, 18rem);
+		border: 1px solid var(--color-divider);
+		border-radius: var(--radius-lg);
+		background: var(--color-raised-bg);
+		box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+		overflow: hidden;
+
+		&:not(.open) {
+			visibility: hidden;
+			border-width: 0;
+		}
+	}
+}
+</style>

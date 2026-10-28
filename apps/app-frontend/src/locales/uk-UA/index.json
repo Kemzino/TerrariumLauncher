@@ -2258,11 +2258,20 @@
   "minecraft-account.add-account": {
     "message": "Додати обліковий запис"
   },
+  "minecraft-account.add-offline-account": {
+    "message": "Додати офлайн-акаунт"
+  },
   "minecraft-account.label": {
     "message": "Обліковий запис Minecraft"
   },
   "minecraft-account.not-signed-in": {
     "message": "Не авторизовано"
+  },
+  "minecraft-account.offline-hint": {
+    "message": "Офлайн-акаунти працюють лише на серверах з online-mode=false."
+  },
+  "minecraft-account.offline-username-placeholder": {
+    "message": "Нікнейм"
   },
   "minecraft-account.remove-account": {
     "message": "Видалити обліковий запис"
