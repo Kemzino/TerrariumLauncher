@@ -1125,15 +1125,19 @@ onMounted(async () => {
 	}
 }
 
-// Окрема маленька скляна панель над нижньою, по центру всієї ширини
+// Язичок на верхньому краї нижньої панелі, по центру: продовження панелі, що
+// показує — нижче ще є бібліотека збірок
 .terrarium-hero__scroll-hint {
 	grid-row: 3;
 	grid-column: 1 / -1;
 	justify-self: center;
 	align-self: end;
-	padding: 0.35rem 1rem 0.3rem;
+	// впритул до панелі: зсуваємо на проміжок між рядками сітки
+	margin-bottom: calc(-0.9rem - 1px);
+	padding: 0.4rem 1.1rem 0.35rem;
 	border: 1px solid color-mix(in srgb, var(--color-contrast) 12%, transparent);
-	border-radius: 999px;
+	border-bottom: 0;
+	border-radius: 0.75rem 0.75rem 0 0;
 	background: var(--terrarium-glass);
 	backdrop-filter: blur(14px);
 	font-family: inherit;
