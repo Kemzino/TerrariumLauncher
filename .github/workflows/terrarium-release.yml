@@ -1,10 +1,11 @@
-name: Terrarium Launcher release
+name: Terrarium Launcher release (усі платформи разом)
 
-# Два способи запустити реліз:
+# Пуш тега vX.Y.Z тепер збирають terrarium-release-{windows,macos,linux}.yml — кожна платформа
+# окремо й додає свої файли в реліз, щойно закінчить (одна збірка, що впала, не блокує інші).
+# Цей воркфлоу лишився для ручного запуску «все разом»:
 #  1. Actions → "Terrarium Launcher release" → Run workflow → ввести версію X.Y.Z.
 #     Воркфлоу сам підніме версію у файлах, закомітить у вибрану гілку, поставить тег і збере.
-#  2. Запушити тег vX.Y.Z вручну (версія у файлах уже має збігатися з тегом).
-#  3. Run workflow з полем tag = існуючий тег — лише перезібрати/дозбирати реліз (без бампа).
+#  2. Run workflow з полем tag = існуючий тег — лише перезібрати/дозбирати реліз (без бампа).
 #
 # Платформи: Windows x64 (NSIS), macOS universal (Intel + Apple Silicon, .dmg + .app.tar.gz
 # для оновлювача) і Linux x64 (AppImage з автооновленням + Flatpak-бандл, перепакований з .deb).
@@ -14,9 +15,6 @@ name: Terrarium Launcher release
 # (і TAURI_SIGNING_PRIVATE_KEY_PASSWORD, якщо ключ із паролем). Див. docs-terrarium/RELEASE.md.
 
 on:
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
     inputs:
       version:

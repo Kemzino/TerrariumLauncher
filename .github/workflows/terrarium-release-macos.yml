@@ -1,0 +1,33 @@
+name: Terrarium Launcher release · macOS
+
+# Збірка macOS для релізу — окремо від інших платформ: не чекає на них і не падає разом із ними.
+# Файли додаються в реліз тега, щойно ця збірка закінчиться (див. terrarium-build.yml).
+#  - запускається пушем тега vX.Y.Z (версія у файлах має збігатися з тегом);
+#  - Actions → цей воркфлоу → Run workflow з тегом — перезібрати лише macOS для наявного релізу.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Тег релізу (vX.Y.Z) — перезібрати macOS і замінити його файли в релізі'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: terrarium-release-macos-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    name: macOS
+    uses: ./.github/workflows/terrarium-build.yml
+    with:
+      platform: macos
+      tag: ${{ inputs.tag || github.ref_name }}
+    secrets: inherit

@@ -1,0 +1,306 @@
+name: Terrarium Launcher build (одна платформа)
+
+# Спільна збірка для terrarium-release-{windows,macos,linux}.yml. Кожна платформа збирається
+# у власному воркфлоу, незалежно від інших, і сама додає свої файли в реліз тега:
+#  1. реліз створює та платформа, що закінчила першою (решта бачать, що він уже є);
+#  2. файли платформи вантажаться в реліз (--clobber: повторний запуск просто замінює їх);
+#  3. latest.json (маніфест оновлювача) щоразу збирається наново з .sig-файлів, які вже
+#     лежать у релізі, — тож у ньому з'являється кожна платформа, щойно її файли готові.
+#     Збірка повторює це ще раз за хвилину: якщо дві платформи писали маніфест одночасно,
+#     друга спроба підхопить файли обох.
+# Поки платформа не дозбиралась, її гравцям оновлення просто ще не пропонується.
+#
+# Потрібен секрет TAURI_SIGNING_PRIVATE_KEY (і TAURI_SIGNING_PRIVATE_KEY_PASSWORD, якщо ключ із
+# паролем) — див. docs-terrarium/RELEASE.md. Виклик — із secrets: inherit.
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: 'windows | macos | linux'
+        required: true
+        type: string
+      tag:
+        description: 'Тег релізу (vX.Y.Z)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Зібрати й додати в реліз
+    # 22.04 для Linux: AppImage вимагає glibc не новішу за раннерову — старіша база = ширша сумісність
+    runs-on: ${{ inputs.platform == 'windows' && 'windows-latest' || inputs.platform == 'macos' && 'macos-latest' || 'ubuntu-22.04' }}
+    env:
+      TAG: ${{ inputs.tag }}
+      SQLX_OFFLINE: 'true'
+      BUNDLES: ${{ inputs.platform == 'windows' && 'nsis' || inputs.platform == 'macos' && 'app,dmg' || 'appimage,deb' }}
+      TARGET: ${{ inputs.platform == 'macos' && 'universal-apple-darwin' || '' }}
+    steps:
+      - name: Check out tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          # історія й теги — для опису змін у релізі
+          fetch-depth: 0
+
+      - name: Verify version matches tag and signing key is configured
+        shell: bash
+        env:
+          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Тег має бути у форматі vX.Y.Z, отримано '$TAG'"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          PKG_VERSION=$(jq -r .version apps/app-frontend/package.json)
+          if [ "$PKG_VERSION" != "$VERSION" ]; then
+            echo "::error::Тег $TAG, а в apps/app-frontend/package.json версія $PKG_VERSION"
+            exit 1
+          fi
+          if [ "$HAS_KEY" != "true" ]; then
+            echo "::error::Секрет TAURI_SIGNING_PRIVATE_KEY не заданий — без нього оновлення не підписати"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf file
+
+      - name: Setup Rust (rust-toolchain.toml)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ''
+          # раннер macOS — Apple Silicon; для universal потрібен ще Intel-таргет
+          target: ${{ inputs.platform == 'macos' && 'x86_64-apple-darwin' || '' }}
+          cache-key: terrarium-release
+
+      # build.rs app-lib збирає java/ через Gradle 9 — йому треба JVM 17+ (на ubuntu-22.04 за замовчуванням 11)
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Setup pnpm
+        run: corepack enable
+
+      # Кешуємо pnpm store, а не node_modules: на Windows node_modules після
+      # tar відновлюється битим (джанкшени в .pnpm дають EPERM, зникають
+      # пакети — так упали збірки v1.0.4 і v1.0.5), а `pnpm install` на ньому
+      # каже «Already up to date» і нічого не лагодить. Зі store лінкування
+      # чистих node_modules займає ~1 хв — прийнятно за надійність.
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare app-lib .env
+        shell: bash
+        env:
+          # Ключ CurseForge API (console.curseforge.com) вбудовується в лаунчер:
+          # без нього моди не з Modrinth показуються без іконок і оновлень
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+        run: |
+          cp packages/app-lib/.env.prod packages/app-lib/.env
+          if [ -n "$CURSEFORGE_API_KEY" ]; then
+            # В одинарних лапках: ключ виду $2a$10$…, а dotenvy у build.rs
+            # без лапок підставляє $2, $10 як змінні й спотворює його
+            echo "CURSEFORGE_API_KEY='$CURSEFORGE_API_KEY'" >> packages/app-lib/.env
+          else
+            echo "::warning::CURSEFORGE_API_KEY не задано в secrets — CurseForge у лаунчері не працюватиме"
+          fi
+
+      # Ті самі кроки, що робить turbo для @modrinth/app-frontend#build, але явно
+      - name: Build frontend
+        run: |
+          pnpm -w i18n:coverage
+          pnpm --filter @modrinth/api-client build
+          pnpm --filter @modrinth/app-frontend build
+
+      # NSIS і nsis_tauri_utils tauri качає з GitHub Releases у %LOCALAPPDATA%/tauri — кешуємо,
+      # бо ці завантаження періодично падають з 5xx
+      - name: Cache Tauri bundler tools
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/tauri
+          key: tauri-tools-${{ runner.os }}-nsis3
+
+      - name: Build app (updater + minisign)
+        shell: bash
+        working-directory: apps/app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # create-dmg на CI без цього чекає на GUI
+          TAURI_BUNDLER_DMG_IGNORE_CI: 'true'
+        run: |
+          args=(build --ci --config tauri-release.conf.json --config tauri.local-release.conf.json --bundles "$BUNDLES")
+          if [ -n "$TARGET" ]; then args+=(--target "$TARGET"); fi
+          # Повтор на випадок тимчасових помилок завантаження інструментів бандлера;
+          # cargo уже зібрано, тож повтор коштує секунди
+          for attempt in 1 2 3; do
+            if pnpm exec tauri "${args[@]}"; then
+              exit 0
+            fi
+            echo "::warning::tauri build впав (спроба $attempt/3), повтор за 30 с"
+            sleep 30
+          done
+          exit 1
+
+      # Імена без пробілів: GitHub перейменовує асети, а URL у latest.json має бути передбачуваним
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-release
+          if [ -n "$TARGET" ]; then BUNDLE="target/$TARGET/release/bundle"; else BUNDLE="target/release/bundle"; fi
+          case "$RUNNER_OS" in
+            Windows)
+              SETUP=$(ls "$BUNDLE"/nsis/*_"${VERSION}"_x64-setup.exe)
+              test -f "$SETUP.sig" || { echo "::error::Немає $SETUP.sig — збірка без ключа підпису?"; exit 1; }
+              cp "$SETUP" "dist-release/Terrarium-Launcher_${VERSION}_x64-setup.exe"
+              cp "$SETUP.sig" "dist-release/Terrarium-Launcher_${VERSION}_x64-setup.exe.sig"
+              ;;
+            macOS)
+              APP_TGZ=$(ls "$BUNDLE"/macos/*.app.tar.gz)
+              test -f "$APP_TGZ.sig" || { echo "::error::Немає $APP_TGZ.sig — збірка без ключа підпису?"; exit 1; }
+              DMG=$(ls "$BUNDLE"/dmg/*.dmg)
+              cp "$APP_TGZ" "dist-release/Terrarium-Launcher_${VERSION}_macos.app.tar.gz"
+              cp "$APP_TGZ.sig" "dist-release/Terrarium-Launcher_${VERSION}_macos.app.tar.gz.sig"
+              cp "$DMG" "dist-release/Terrarium-Launcher_${VERSION}_universal.dmg"
+              ;;
+            Linux)
+              APPIMAGE=$(ls "$BUNDLE"/appimage/*.AppImage)
+              test -f "$APPIMAGE.sig" || { echo "::error::Немає $APPIMAGE.sig — збірка без ключа підпису?"; exit 1; }
+              cp "$APPIMAGE" "dist-release/Terrarium-Launcher_${VERSION}_amd64.AppImage"
+              cp "$APPIMAGE.sig" "dist-release/Terrarium-Launcher_${VERSION}_amd64.AppImage.sig"
+              cp "$(ls "$BUNDLE"/deb/*.deb)" apps/app/flatpak/terrarium-launcher.deb
+              ;;
+          esac
+          ls -la dist-release
+
+      # Flatpak: перепаковуємо щойно зібраний .deb у рантайм GNOME і робимо однофайловий .flatpak
+      - name: Build Flatpak bundle
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: apps/app/flatpak
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          cp ../icons/icon.png icon.png
+          flatpak-builder --user --install-deps-from=flathub --force-clean --repo=repo build \
+            io.github.kemzino.TerrariumLauncher.yml
+          flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+            repo "$GITHUB_WORKSPACE/dist-release/Terrarium-Launcher_${VERSION}_x86_64.flatpak" \
+            io.github.kemzino.TerrariumLauncher
+          ls -la "$GITHUB_WORKSPACE/dist-release"
+
+      # Реліз створює та платформа, що дозбиралась першою; опис — однаковий для всіх
+      - name: Create release if missing
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Реліз $TAG уже є — лише додаю файли"
+            exit 0
+          fi
+          # Попередній опублікований реліз (теги без релізу, напр. з невдалою збіркою, пропускаємо)
+          PREV=$(gh release list --exclude-drafts --limit 30 --json tagName --jq '.[].tagName' | grep -vx "$TAG" | head -1 || true)
+          {
+            echo "## Terrarium Launcher ${VERSION}"
+            echo
+            if [ -n "$PREV" ] && git rev-parse -q --verify "refs/tags/$PREV" >/dev/null; then
+              echo "Зміни з ${PREV}:"
+              echo
+              git log --no-merges --pretty='- %s' "${PREV}..${TAG}" | grep -v '^- chore: release ' || true
+            else
+              echo "Перший реліз."
+            fi
+            echo
+            echo "### Встановлення"
+            echo
+            echo "Файли кожної платформи з'являються тут, щойно її збірка закінчиться."
+            echo
+            echo "- **Windows**: \`Terrarium-Launcher_${VERSION}_x64-setup.exe\`. Інсталятор без сертифіката Authenticode — SmartScreen може попередити: «Докладніше» → «Виконати в будь-якому разі»."
+            echo "- **Linux (AppImage)**: \`Terrarium-Launcher_${VERSION}_amd64.AppImage\` — \`chmod +x\` і запустити; оновлюється автоматично."
+            echo "- **Linux (Flatpak)**: \`flatpak install --user Terrarium-Launcher_${VERSION}_x86_64.flatpak\` (рантайм GNOME підтягнеться з Flathub). Оновлення — встановити новий файл."
+            echo "- **macOS** (Intel і Apple Silicon): \`Terrarium-Launcher_${VERSION}_universal.dmg\`. Застосунок не нотаризований Apple — при першому запуску натисни правою кнопкою → «Відкрити», або в терміналі: \`xattr -cr \"/Applications/Terrarium Launcher.app\"\`."
+            echo
+            echo "Встановлені лаунчери оновлюються автоматично."
+          } > release-notes.md
+          cat release-notes.md
+          # Дві платформи могли закінчити одночасно: якщо реліз уже створила інша — це не помилка
+          gh release create "$TAG" --verify-tag --title "Terrarium Launcher ${VERSION}" --notes-file release-notes.md \
+            || gh release view "$TAG" >/dev/null
+
+      - name: Upload platform files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" dist-release/* --clobber
+          echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
+
+      # https://tauri.app/plugin/updater/#server-support — маніфест із тих платформ, чиї файли вже
+      # в релізі; один universal .app.tar.gz на обидві macOS-архітектури
+      - name: Update latest.json (Tauri updater manifest)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          update_manifest() {
+            local dir assets json
+            dir=$(mktemp -d)
+            assets=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+            gh release view "$TAG" --json body --jq .body > "$dir/notes.md"
+            json=$(jq -n --arg v "$VERSION" --rawfile notes "$dir/notes.md" \
+              '{version: $v, notes: $notes, pub_date: (now | todateiso8601), platforms: {}}')
+            add() { # add <ключ платформи> <файл у релізі>
+              grep -qxF "$2.sig" <<<"$assets" || return 0
+              gh release download "$TAG" --pattern "$2.sig" --dir "$dir" --clobber
+              json=$(jq --arg k "$1" --rawfile sig "$dir/$2.sig" --arg url "$BASE/$2" \
+                '.platforms[$k] = {signature: ($sig | rtrimstr("\n")), url: $url}' <<<"$json")
+            }
+            add windows-x86_64 "Terrarium-Launcher_${VERSION}_x64-setup.exe"
+            add darwin-aarch64 "Terrarium-Launcher_${VERSION}_macos.app.tar.gz"
+            add darwin-x86_64 "Terrarium-Launcher_${VERSION}_macos.app.tar.gz"
+            add linux-x86_64 "Terrarium-Launcher_${VERSION}_amd64.AppImage"
+            echo "$json" > "$dir/latest.json"
+            jq -c '.platforms | keys' "$dir/latest.json"
+            gh release upload "$TAG" "$dir/latest.json" --clobber
+          }
+          update_manifest
+          # якщо інша платформа писала маніфест одночасно з нами, її запис міг затерти наш
+          # (або навпаки) — за хвилину збираємо ще раз із того, що вже є в релізі
+          sleep 60
+          update_manifest
