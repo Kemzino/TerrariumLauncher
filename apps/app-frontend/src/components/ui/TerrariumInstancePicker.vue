@@ -142,10 +142,12 @@ function loaderLabel(i: GameInstance) {
 .instance-picker {
 	position: relative;
 	display: inline-block;
+	max-width: 100%;
 }
 
 .instance-picker__chip {
 	display: inline-flex;
+	max-width: 100%;
 	align-items: center;
 	gap: 0.75rem;
 	padding: 0.5rem 0.9rem 0.5rem 0.5rem;

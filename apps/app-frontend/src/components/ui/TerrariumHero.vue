@@ -1017,17 +1017,33 @@ onMounted(async () => {
 					</Button>
 
 					<span class="terrarium-hero__more">
-						<Button v-if="installed" size="lg" :disabled="!!busy" @click="openMods">
+						<!-- на вужчій панелі підписи ховаються (лишаються іконки з підказками) -->
+						<Button
+							v-if="installed"
+							v-tooltip="
+								isServer ? formatMessage(messages.modsServer) : formatMessage(messages.mods)
+							"
+							size="lg"
+							:disabled="!!busy"
+							@click="openMods"
+						>
 							<PackageOpenIcon />
-							{{ isServer ? formatMessage(messages.modsServer) : formatMessage(messages.mods) }}
+							<span class="terrarium-hero__btn-label">{{
+								isServer ? formatMessage(messages.modsServer) : formatMessage(messages.mods)
+							}}</span>
 						</Button>
 						<Button
-							v-tooltip="changelogUnread ? formatMessage(messages.changelogUnread) : undefined"
+							v-tooltip="
+								changelogUnread
+									? formatMessage(messages.changelogUnread)
+									: formatMessage(messages.changelog)
+							"
 							size="lg"
 							class="relative"
 							@click="openChangelog"
 						>
-							<HistoryIcon /> {{ formatMessage(messages.changelog) }}
+							<HistoryIcon />
+							<span class="terrarium-hero__btn-label">{{ formatMessage(messages.changelog) }}</span>
 							<span
 								v-if="changelogUnread"
 								class="absolute -right-1 -top-1 size-3 rounded-full bg-orange ring-2 ring-[var(--color-raised-bg)]"
@@ -1267,8 +1283,11 @@ onMounted(async () => {
 .terrarium-hero__dock {
 	grid-area: dock;
 	display: flex;
+	// коли все не влазить в один рядок, кнопки переносяться на другий
+	flex-wrap: wrap;
 	align-items: center;
-	gap: 1.25rem;
+	gap: 0.75rem 1.25rem;
+	container: dock / inline-size;
 	padding: 0.85rem 1rem;
 	border-radius: var(--radius-lg);
 	background: var(--terrarium-glass);
@@ -1284,6 +1303,8 @@ onMounted(async () => {
 
 .terrarium-hero__area--state {
 	flex: 1 1 auto;
+	// картка збірки стискається (назва обрізається), перш ніж кнопки підуть на інший рядок
+	flex-basis: 16rem;
 	padding-left: 1.25rem;
 	border-left: 1px solid color-mix(in srgb, var(--color-contrast) 12%, transparent);
 }
@@ -1292,6 +1313,18 @@ onMounted(async () => {
 	display: flex;
 	align-items: center;
 	gap: 0.75rem;
+	margin-left: auto;
+}
+
+// Вужча панель: другорядні кнопки — лише іконки, акаунт компактніший
+@container dock (max-width: 1250px) {
+	.terrarium-hero__btn-label {
+		display: none;
+	}
+
+	.terrarium-hero__account {
+		flex-basis: 14rem;
+	}
 }
 
 // Другорядні кнопки — перед головними й дрібніші, «Грати» в правому кінці панелі
@@ -1310,7 +1343,8 @@ onMounted(async () => {
 	display: block;
 	// Рідний кадр — 600×384. Збільшуємо в 1,25 раза з різкими пікселями (pixelated, без
 	// «мила»); на низькому вікні — менше, щоб лого не витісняло панель
-	width: min(100%, 46.875rem, calc((100vh - 24rem) * 1.5625));
+	// висота лого ≤ вікно мінус усе інше на екрані (панель, посилання, відступи)
+	width: min(100%, 46.875rem, calc((100vh - 30rem) * 1.5625));
 	height: auto;
 	image-rendering: pixelated;
 	// Тінь лише під кубом, щоб логотип не висів у повітрі; на прозорих
@@ -1451,6 +1485,7 @@ onMounted(async () => {
 		grid-template-rows: none;
 		grid-template-areas:
 			'brand'
+			'hint'
 			'dock'
 			'news'
 			'admin'
@@ -1464,8 +1499,13 @@ onMounted(async () => {
 		max-height: 32rem;
 	}
 
-	.terrarium-hero__dock {
-		flex-wrap: wrap;
+	.terrarium-hero__scroll-hint {
+		grid-area: hint;
+	}
+
+	// в одну колонку панель на два рядки — лого ще нижче, щоб панель лишалась на першому екрані
+	.terrarium-hero__logo {
+		width: min(100%, 37.5rem, calc((100vh - 26rem) * 1.5625));
 	}
 }
 </style>
