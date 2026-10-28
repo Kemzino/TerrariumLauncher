@@ -911,9 +911,13 @@ onMounted(async () => {
 								{{ formatMessage(messages.unknownLatest, { tag: installedTag ?? '—' }) }}
 							</template>
 							<template v-else>
-								<UpdatedIcon class="text-brand" /> {{ formatMessage(messages.upToDate) }}
-								<span v-if="installedTag" class="terrarium-hero__muted">
-									· {{ installedTag }}
+								<!-- остання версія — лише номер; «остання» видно з галочки й підказки -->
+								<span
+									v-tooltip="formatMessage(messages.upToDate)"
+									class="inline-flex items-center gap-1"
+								>
+									<UpdatedIcon class="text-brand" />
+									{{ installedTag ?? formatMessage(messages.upToDate) }}
 								</span>
 							</template>
 						</template>
@@ -1304,7 +1308,7 @@ onMounted(async () => {
 .terrarium-hero__area--state {
 	flex: 1 1 auto;
 	// картка збірки стискається (назва обрізається), перш ніж кнопки підуть на інший рядок
-	flex-basis: 16rem;
+	flex-basis: 11rem;
 	padding-left: 1.25rem;
 	border-left: 1px solid color-mix(in srgb, var(--color-contrast) 12%, transparent);
 }

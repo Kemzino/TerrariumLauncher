@@ -81,7 +81,7 @@ function loaderLabel(i: GameInstance) {
 					class="instance-picker__avatar"
 				/>
 				<span class="instance-picker__text">
-					<span class="instance-picker__name">{{ current.name }}</span>
+					<span v-tooltip="current.name" class="instance-picker__name">{{ current.name }}</span>
 					<span v-if="$slots.detail" class="instance-picker__detail"><slot name="detail" /></span>
 					<span v-else class="instance-picker__label">{{ formatMessage(messages.linked) }}</span>
 				</span>
@@ -234,7 +234,8 @@ function loaderLabel(i: GameInstance) {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	max-width: 24rem;
+	// довгі назви примірників скорочуються «…», повна — у підказці
+	max-width: 16rem;
 }
 
 .instance-picker__meta {
