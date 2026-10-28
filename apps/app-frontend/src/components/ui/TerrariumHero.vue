@@ -642,6 +642,11 @@ function onPublished(published: PublishedRelease) {
 	if (release.value) release.value = { ...release.value, tag: published.tag }
 }
 
+function scrollToLibrary(event: MouseEvent) {
+	const hero = (event.currentTarget as HTMLElement).closest('.terrarium-hero')
+	hero?.nextElementSibling?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 function openMods() {
 	if (!instance.value) return
 	router.push(`/instance/${encodeURIComponent(instance.value.id)}`)
@@ -851,12 +856,6 @@ onMounted(async () => {
 				</p>
 			</div>
 
-			<!-- Підказка, що нижче є бібліотека збірок — над панеллю, по центру -->
-			<div class="terrarium-hero__scroll-hint" aria-hidden="true">
-				<span>{{ formatMessage(messages.scrollHint) }}</span>
-				<ChevronDownIcon />
-			</div>
-
 			<!-- Нижня панель: хто грає · яка збірка і в якому стані · кнопки запуску -->
 			<div class="terrarium-hero__dock">
 				<div class="terrarium-hero__account">
@@ -943,6 +942,12 @@ onMounted(async () => {
 						{{ formatMessage(messages.testHint) }}
 					</p>
 				</div>
+
+				<!-- Нижче головної — бібліотека збірок; клік прокручує до неї -->
+				<button type="button" class="terrarium-hero__scroll-hint" @click="scrollToLibrary">
+					<span>{{ formatMessage(messages.scrollHint) }}</span>
+					<ChevronDownIcon />
+				</button>
 
 				<div class="terrarium-hero__area terrarium-hero__area--play">
 					<template v-if="playing">
@@ -1120,12 +1125,23 @@ onMounted(async () => {
 	}
 }
 
+// На панелі між карткою збірки й кнопками, займає вільне місце й стоїть по центру
 .terrarium-hero__scroll-hint {
-	// Рядок над нижньою панеллю, по центру всієї ширини (поруч із посиланнями зліва)
-	grid-row: 3;
-	grid-column: 1 / -1;
-	justify-self: center;
-	align-self: end;
+	flex: 1 1 auto;
+	align-self: stretch;
+	justify-content: center;
+	padding: 0;
+	border: 0;
+	background: none;
+	font-family: inherit;
+	cursor: pointer;
+	transition: opacity 0.15s ease;
+
+	&:hover {
+		opacity: 1;
+		color: var(--color-contrast);
+	}
+
 	display: flex;
 	flex-direction: column;
 	align-items: center;
@@ -1136,7 +1152,6 @@ onMounted(async () => {
 	text-transform: uppercase;
 	color: var(--color-secondary);
 	opacity: 0.7;
-	pointer-events: none;
 
 	svg {
 		width: 1.1rem;
@@ -1257,7 +1272,7 @@ onMounted(async () => {
 }
 
 .terrarium-hero__area--state {
-	flex: 1 1 auto;
+	flex: 0 1 auto;
 	padding-left: 1.25rem;
 	border-left: 1px solid color-mix(in srgb, var(--color-contrast) 12%, transparent);
 }
