@@ -525,7 +525,39 @@ async fn install_minecraft_inner(
         .directories
         .version_dir(&version_jar)
         .join(format!("{version_jar}.jar"));
-    if let Some(processors) = &version_info.processors {
+    // Процесори лоадера (пропатчування клієнта NeoForge) — найдовший крок встановлення. Їхній результат лежить у
+    // спільній теці libraries, тож якщо цей самий набір процесорів уже відпрацював і його файли на місці,
+    // повторно не запускаємо: оновлення збірки без зміни NeoForge не перепатчує клієнт. «Відновити» — завжди заново.
+    let processors_marker = state
+        .directories
+        .version_dir(&version_jar)
+        .join(".terrarium-processors");
+    let processors_fingerprint = version_info
+        .processors
+        .as_ref()
+        .map(|p| processors_fingerprint(p, version_info.data.as_ref()));
+    let processors_done = !repairing
+        && match (&version_info.processors, &processors_fingerprint) {
+            (Some(processors), Some(fingerprint)) => {
+                processors_up_to_date(
+                    &processors_marker,
+                    fingerprint,
+                    processors,
+                    version_info.data.as_ref(),
+                    &state.directories.libraries_dir(),
+                )
+                .await
+            }
+            _ => false,
+        };
+    if processors_done {
+        tracing::info!(
+            "Loader processors for {version_jar} already ran with the same inputs, skipping"
+        );
+    }
+    if let Some(processors) =
+        version_info.processors.as_ref().filter(|_| !processors_done)
+    {
         let libraries_dir = state.directories.libraries_dir();
 
         if let Some(ref mut data) = version_info.data {
@@ -663,6 +695,14 @@ async fn install_minecraft_inner(
                         .await?;
                 }
             }
+            if let Some(fingerprint) = &processors_fingerprint
+                && let Err(error) =
+                    io::write(&processors_marker, fingerprint.as_bytes()).await
+            {
+                tracing::warn!(
+                    "Could not record finished loader processors for {version_jar}: {error}"
+                );
+            }
         }
     }
 
@@ -726,6 +766,77 @@ async fn install_minecraft_inner(
     }
 
     result
+}
+
+
+/// Відбиток набору процесорів лоадера і їхніх даних: якщо він не змінився, результат той самий.
+fn processors_fingerprint(
+    processors: &[d::modded::Processor],
+    data: Option<&std::collections::HashMap<String, d::modded::SidedDataEntry>>,
+) -> String {
+    let mut hasher = sha1_smol::Sha1::new();
+    hasher.update(
+        serde_json::to_string(processors)
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    if let Some(data) = data {
+        let mut entries = data
+            .iter()
+            .map(|(k, v)| format!("{k}={}", v.client))
+            .collect::<Vec<_>>();
+        entries.sort();
+        hasher.update(entries.join("
+").as_bytes());
+    }
+    hasher.digest().to_string()
+}
+
+/// Процесори вже відпрацювали з цим самим відбитком, і файли, які вони мали створити, на місці.
+async fn processors_up_to_date(
+    marker: &Path,
+    fingerprint: &str,
+    processors: &[d::modded::Processor],
+    data: Option<&std::collections::HashMap<String, d::modded::SidedDataEntry>>,
+    libraries_dir: &Path,
+) -> bool {
+    let Ok(recorded) = tokio::fs::read_to_string(marker).await else {
+        return false;
+    };
+    if recorded.trim() != fingerprint {
+        return false;
+    }
+    for processor in processors {
+        if let Some(sides) = &processor.sides
+            && !sides.contains(&String::from("client"))
+        {
+            continue;
+        }
+        for output in processor.outputs.iter().flat_map(|o| o.keys()) {
+            if let Some(path) = resolve_processor_path(output, data, libraries_dir)
+                && !path.exists()
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// `{KEY}` -> значення з data, `[group:artifact:version]` -> файл у libraries; інакше None (не перевіряємо).
+fn resolve_processor_path(
+    value: &str,
+    data: Option<&std::collections::HashMap<String, d::modded::SidedDataEntry>>,
+    libraries_dir: &Path,
+) -> Option<PathBuf> {
+    let value = match value.strip_prefix('{').and_then(|v| v.strip_suffix('}')) {
+        Some(key) => data?.get(key)?.client.clone(),
+        None => value.to_string(),
+    };
+    let artifact = value.strip_prefix('[')?.strip_suffix(']')?;
+    d::get_path_from_artifact(artifact)
+        .ok()
+        .map(|p| libraries_dir.join(p))
 }
 
 pub async fn install_minecraft_for_instance_id_with_reporter(
