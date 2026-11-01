@@ -112,6 +112,8 @@ struct ModpackContentInstallContext {
     file_infos_by_hash: Arc<HashMap<String, CachedFile>>,
     num_files: usize,
     content_total_bytes: u64,
+    reused_files: Arc<AtomicU64>,
+    downloaded_bytes: Arc<AtomicU64>,
 }
 
 impl ModpackContentInstallContext {
@@ -698,9 +700,24 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
     };
 
     let num_files = pack.files.len();
+    // Terrarium: only what will really be downloaded counts towards the bytes shown — files the update parked with
+    // the same path and size are taken back from disk (checked by SHA-1 then), and client-unsupported files are
+    // skipped. Before, the whole pack (~600 MB) was shown on every update, as if all of it were downloaded again.
+    let stash_dir = instance_full_path.join(UPDATE_STASH_DIR);
     let content_total_bytes = pack
         .files
         .iter()
+        .filter(|file| {
+            !file.env.as_ref().is_some_and(|env| {
+                env.get(&EnvType::Client)
+                    .is_some_and(|x| x == &SideType::Unsupported)
+            })
+        })
+        .filter(|file| {
+            std::fs::metadata(stash_dir.join(file.path.as_str()))
+                .map(|meta| !meta.is_file() || meta.len() != file.file_size as u64)
+                .unwrap_or(true)
+        })
         .map(|file| file.file_size as u64)
         .sum::<u64>();
     reporter
@@ -761,7 +778,13 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
         file_infos_by_hash,
         num_files,
         content_total_bytes,
+        reused_files: Arc::new(AtomicU64::new(0)),
+        downloaded_bytes: Arc::new(AtomicU64::new(0)),
     };
+    let reuse_stats = (
+        content_context.reused_files.clone(),
+        content_context.downloaded_bytes.clone(),
+    );
     loading_try_for_each_concurrent(
         futures::stream::iter(pack.files).map(Ok::<PackFile, crate::Error>),
         Some(MODPACK_CONTENT_DOWNLOAD_CONCURRENCY),
@@ -786,7 +809,7 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                 {
                     content_context
                         .mark_downloaded(
-                            project_size,
+                            0,
                             InstallJobEventKind::ContentFileSkipped {
                                 path: project_path,
                                 reason: "unsupported on client".to_string(),
@@ -825,7 +848,9 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                     project.hashes.get(&PackFileHash::Sha1).map(|x| &**x),
                 )
                 .await;
+                let was_reused = reused.is_some();
                 let (downloaded_bytes, file_sha1) = if let Some(reused) = reused {
+                    content_context.reused_files.fetch_add(1, Ordering::Relaxed);
                     reused
                 } else {
                 let progress_key = project_path.clone();
@@ -922,6 +947,9 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
 						file.copy_to(path, &state.io_semaphore).await,
 					)
 					.await?;
+                content_context
+                    .downloaded_bytes
+                    .fetch_add(file.size, Ordering::Relaxed);
                 (file.size, file.sha1.clone())
                 };
                 let path = target_path;
@@ -993,7 +1021,7 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
 
                 content_context
                     .mark_downloaded(
-                        project_size,
+                        if was_reused { 0 } else { project_size },
                         InstallJobEventKind::ContentFileCompleted {
                             path: project_path,
                             bytes: downloaded_bytes,
@@ -1006,6 +1034,12 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
     )
     .await?;
 
+    tracing::info!(
+        "Modpack content: {} of {} files taken from the previous version on disk, {:.1} MB downloaded",
+        reuse_stats.0.load(Ordering::Relaxed),
+        num_files,
+        reuse_stats.1.load(Ordering::Relaxed) as f64 / 1e6
+    );
     // Terrarium: whatever the update parked and the new version did not take back is gone from the pack.
     let _ = io::remove_dir_all(instance_full_path.join(UPDATE_STASH_DIR)).await;
 
