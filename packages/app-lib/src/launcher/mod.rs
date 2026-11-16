@@ -1259,7 +1259,7 @@ pub async fn launch_minecraft(
 
     let _ = state
         .discord_rpc
-        .set_activity(&format!("Playing {}", instance.name), true)
+        .set_activity(&format!("Грає в {}", instance.name), true)
         .await;
 
     let _ = state

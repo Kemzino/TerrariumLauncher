@@ -2,11 +2,18 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 use discord_rich_presence::{
     DiscordIpc, DiscordIpcClient,
-    activity::{Activity, Assets},
+    activity::{Activity, Assets, Button},
 };
 use tokio::sync::RwLock;
 
 use crate::State;
+
+/// Terrarium's Discord application: its name is what Discord shows above the status.
+const DISCORD_APP_ID: &str = "1551301026618015784";
+/// Large image of the status (an art asset key of the app, or an https URL).
+const DISCORD_LOGO: &str = "https://raw.githubusercontent.com/Kemzino/TerrariumLauncher/terrarium/apps/app-frontend/src/assets/terrarium/logo.png";
+/// The button under the status: our Discord server.
+const DISCORD_INVITE: &str = "https://discord.gg/S7NUwdGQHZ";
 
 pub struct DiscordGuard {
     client: Arc<RwLock<DiscordIpcClient>>,
@@ -17,7 +24,7 @@ impl DiscordGuard {
     /// Initialize discord IPC client, and attempt to connect to it
     /// If it fails, it will still return a DiscordGuard, but the client will be unconnected
     pub fn init() -> crate::Result<DiscordGuard> {
-        let dipc = DiscordIpcClient::new("1123683254248148992");
+        let dipc = DiscordIpcClient::new(DISCORD_APP_ID);
 
         Ok(DiscordGuard {
             client: Arc::new(RwLock::new(dipc)),
@@ -70,11 +77,14 @@ impl DiscordGuard {
             return Ok(());
         }
 
-        let activity = Activity::new().state(msg).assets(
-            Assets::new()
-                .large_image("modrinth_simple")
-                .large_text("Modrinth Logo"),
-        );
+        let activity = Activity::new()
+            .state(msg)
+            .assets(
+                Assets::new()
+                    .large_image(DISCORD_LOGO)
+                    .large_text("Terrarium Create"),
+            )
+            .buttons(vec![Button::new("Discord сервер Terrarium", DISCORD_INVITE)]);
 
         // Attempt to set the activity
         // If the existing connection fails, attempt to reconnect and try again
@@ -136,12 +146,12 @@ impl DiscordGuard {
         let running_instances = state.process_manager.get_all();
         if let Some(existing_child) = running_instances.first() {
             self.set_activity(
-                &format!("Playing {}", existing_child.instance_name),
+                &format!("Грає в {}", existing_child.instance_name),
                 reconnect_if_fail,
             )
             .await?;
         } else {
-            self.set_activity("Idling...", reconnect_if_fail).await?;
+            self.set_activity("У лаунчері", reconnect_if_fail).await?;
         }
         Ok(())
     }
