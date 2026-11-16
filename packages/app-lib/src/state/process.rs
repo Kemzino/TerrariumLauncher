@@ -814,6 +814,14 @@ impl Process {
         message: &str,
         timestamp: DateTime<Utc>,
     ) -> crate::Result<()> {
+        if message.starts_with("Starting integrated minecraft server") {
+            let state = crate::State::get().await?;
+            let _ = state
+                .discord_rpc
+                .game_status("Грає в одиночному світі")
+                .await;
+            return Ok(());
+        }
         let Some(host_port_string) = message.strip_prefix("Connecting to ")
         else {
             return Ok(());
@@ -827,6 +835,7 @@ impl Process {
         };
 
         let state = crate::State::get().await?;
+        let _ = state.discord_rpc.game_status("Грає на сервері").await;
         crate::state::server_join_log::JoinLogEntry {
             instance_id: instance_id.to_owned(),
             host: host.to_string(),

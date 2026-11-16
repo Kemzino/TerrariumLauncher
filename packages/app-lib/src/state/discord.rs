@@ -2,7 +2,7 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 use discord_rich_presence::{
     DiscordIpc, DiscordIpcClient,
-    activity::{Activity, Assets, Button},
+    activity::{Activity, Assets, Button, Timestamps},
 };
 use tokio::sync::RwLock;
 
@@ -10,14 +10,22 @@ use crate::State;
 
 /// Terrarium's Discord application: its name is what Discord shows above the status.
 const DISCORD_APP_ID: &str = "1551301026618015784";
-/// Large image of the status (an art asset key of the app, or an https URL).
-const DISCORD_LOGO: &str = "https://raw.githubusercontent.com/Kemzino/TerrariumLauncher/terrarium/apps/app-frontend/src/assets/terrarium/logo.png";
-/// The button under the status: our Discord server.
+/// Large image of the status: the pack's animated planet logo (an art asset key of the app, or an https URL).
+const DISCORD_LOGO: &str = "https://raw.githubusercontent.com/Kemzino/TerrariumLauncher/terrarium/apps/app-frontend/src/assets/terrarium/discord/logo.gif";
+/// Our Discord server: the button under the status, and where the status lines link to.
 const DISCORD_INVITE: &str = "https://discord.gg/S7NUwdGQHZ";
 
 pub struct DiscordGuard {
     client: Arc<RwLock<DiscordIpcClient>>,
     connected: Arc<AtomicBool>,
+    game: Arc<RwLock<Option<GameStatus>>>,
+}
+
+/// What the running game is doing, read from its log, and since when it runs.
+#[derive(Clone)]
+struct GameStatus {
+    text: String,
+    started: i64,
 }
 
 impl DiscordGuard {
@@ -29,6 +37,7 @@ impl DiscordGuard {
         Ok(DiscordGuard {
             client: Arc::new(RwLock::new(dipc)),
             connected: Arc::new(AtomicBool::new(false)),
+            game: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -77,14 +86,21 @@ impl DiscordGuard {
             return Ok(());
         }
 
-        let activity = Activity::new()
+        let started = self.game.read().await.as_ref().map(|game| game.started);
+        let mut activity = Activity::new()
+            .details("Terrarium Create")
+            .details_url(DISCORD_INVITE)
             .state(msg)
+            .state_url(DISCORD_INVITE)
             .assets(
                 Assets::new()
                     .large_image(DISCORD_LOGO)
                     .large_text("Terrarium Create"),
             )
             .buttons(vec![Button::new("Discord сервер Terrarium", DISCORD_INVITE)]);
+        if let Some(started) = started {
+            activity = activity.timestamps(Timestamps::new().start(started));
+        }
 
         // Attempt to set the activity
         // If the existing connection fails, attempt to reconnect and try again
@@ -102,6 +118,33 @@ impl DiscordGuard {
         }
 
         Ok(())
+    }
+
+    /// A game was started: the status shows it (and the play time) until the game says more in its log.
+    pub async fn game_started(&self, instance_name: &str) -> crate::Result<()> {
+        let text = format!("Запускає {instance_name}");
+        *self.game.write().await = Some(GameStatus {
+            text: text.clone(),
+            started: chrono::Utc::now().timestamp(),
+        });
+        self.set_activity(&text, true).await
+    }
+
+    /// The running game changed what it does (joined a server, opened a world).
+    pub async fn game_status(&self, text: &str) -> crate::Result<()> {
+        {
+            let mut game = self.game.write().await;
+            match game.as_mut() {
+                Some(game) => game.text = text.to_string(),
+                None => {
+                    *game = Some(GameStatus {
+                        text: text.to_string(),
+                        started: chrono::Utc::now().timestamp(),
+                    })
+                }
+            }
+        }
+        self.set_activity(text, true).await
     }
 
     /// Clear the activity entirely ('disabling' the RPC until the next set_activity)
@@ -145,12 +188,18 @@ impl DiscordGuard {
 
         let running_instances = state.process_manager.get_all();
         if let Some(existing_child) = running_instances.first() {
-            self.set_activity(
-                &format!("Грає в {}", existing_child.instance_name),
-                reconnect_if_fail,
-            )
-            .await?;
+            let text = self
+                .game
+                .read()
+                .await
+                .as_ref()
+                .map(|game| game.text.clone())
+                .unwrap_or_else(|| {
+                    format!("Грає в {}", existing_child.instance_name)
+                });
+            self.set_activity(&text, reconnect_if_fail).await?;
         } else {
+            *self.game.write().await = None;
             self.set_activity("У лаунчері", reconnect_if_fail).await?;
         }
         Ok(())
