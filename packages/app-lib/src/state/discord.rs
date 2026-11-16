@@ -97,7 +97,7 @@ impl DiscordGuard {
                     .large_image(DISCORD_LOGO)
                     .large_text("Terrarium Create"),
             )
-            .buttons(vec![Button::new("Discord сервер Terrarium", DISCORD_INVITE)]);
+            .buttons(vec![Button::new("Доєднатися до серверу", DISCORD_INVITE)]);
         if let Some(started) = started {
             activity = activity.timestamps(Timestamps::new().start(started));
         }
