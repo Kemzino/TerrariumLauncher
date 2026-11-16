@@ -10,8 +10,8 @@ use crate::State;
 
 /// Terrarium's Discord application: its name is what Discord shows above the status.
 const DISCORD_APP_ID: &str = "1551301026618015784";
-/// Large image of the status: the pack's animated planet logo (an art asset key of the app, or an https URL).
-const DISCORD_LOGO: &str = "https://raw.githubusercontent.com/Kemzino/TerrariumLauncher/terrarium/apps/app-frontend/src/assets/terrarium/discord/logo.gif";
+/// Large image of the status: the pack icon, the animated planet (an art asset key of the app, or an https URL).
+const DISCORD_LOGO: &str = "https://raw.githubusercontent.com/Kemzino/TerrariumLauncher/terrarium/apps/app-frontend/src/assets/terrarium/discord/planet.gif";
 /// Our Discord server: the button under the status, and where the status lines link to.
 const DISCORD_INVITE: &str = "https://discord.gg/S7NUwdGQHZ";
 
